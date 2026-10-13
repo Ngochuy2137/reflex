@@ -77,20 +77,6 @@ the release Docker image took 1 h 49 min on an RTX 3090 and gave 90.3 / 90.9 on 
 encoder: 89.1 / 88.4). The feature collections of that run were identical to the laboratory ones; the CNN
 step is not deterministic.
 
-## Details not stated in the paper
-
-- The Stage 3 heatmap CNN is trained on frames rendered while an earlier, unreleased 16-D latent
-  controller drove the robot; its latent is the CNN's auxiliary target and is discarded afterwards
-  (`docs/STAGE3.md`). Everything after that step uses the released Stage 2 controller.
-- Stage 2 training samples the three box sizes 4:1:1 (training box : small : large;
-  `BOX_MODEL=mix:small,small,small,small,mini,largeold` in `configs/train/stage2_latent.env`, where `small` is the
-  internal name of the 34×26×22 cm training box). Stage 1 trains on the training box only.
-- The two-stage arm reflex (arms down while waiting, raised when a throw is detected) is triggered by the
-  simulated box-state estimator, and the reference arm pose in the observation switches on the simulator's
-  launch flag (`BOX_V38_REF_ARMS`, `BOX_V38_TS_FROM_PERC` in the configs); neither is derived from the
-  visual latent.
-- The paper's torso-excursion statistic (38° threshold) is not computed by the released evaluator.
-
 ## What is not in this release
 
 - The hardware deployment stack (onboard perception and control on the Unitree G1).
