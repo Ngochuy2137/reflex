@@ -132,8 +132,9 @@ Expected catch success on the `regular` condition (paper: evaluation seeds 8 and
 | `true_z` | 88.4 | 90.0 | 86.9 |
 | `teacher` | 89.4 | 88.8 | 90.0 |
 
-`true_z` and `teacher` do not render; with this code they reproduced the paper's per-throw results
-exactly (checked on seed 8, all 320 throws). Camera
+`true_z` and `teacher` do not render; on our machine (RTX 3090, the Docker image) this code reproduced
+the paper's per-throw results exactly (checked on seed 8, all 320 throws). On other GPUs or installs the
+individual throws can differ while the pooled rates stay within a point or two. Camera
 rendering in Isaac Sim is not deterministic, so `visual` varies by a few points between runs (a rerun
 of seed 8 with this code gave 90.3).
 
@@ -152,10 +153,12 @@ scripts/train_stage3.sh                                                 # Stage 
 - `scripts/train_stage2.sh bc` writes `data/stage2/bc_init.pt`; the released `data/checkpoints/bc_init_stage2.pt`
   is left untouched. `scripts/train_stage2.sh ppo` starts from the released file by default; pass
   `--init data/stage2/bc_init.pt` to use your own behaviour-cloning result.
-- **Stage 1 note.** The released teacher was trained through a sequence of warm-started runs; the
-  earlier runs of that sequence are not reproducible. `configs/train/stage1_teacher.env` is the
-  configuration of the final run (600 iterations, 4096 environments). Training from scratch with it
-  has not been tested.
+- **Stage 1 note.** The released teacher was trained through a sequence of warm-started runs (paper,
+  Sec. Method); the earlier runs of that sequence are not reproducible. `configs/train/stage1_teacher.env`
+  is the configuration of the final run (600 iterations, 4096 environments). Training from scratch with
+  this configuration does **not** reach the released teacher: in our run the reward kept rising for 2400
+  iterations, but catch success on `regular` stayed at 11--15 % (interception about 32 %) at 600, 1200
+  and 2400 iterations, against 89 % for the released teacher. See `docs/REPRODUCE.md`.
 - **Stage 3.** `scripts/train_stage3.sh` trains the visual encoder for the fixed Stage 2 controller and evaluates it:
   heatmap CNN on 96k rendered RGB-D frames (70 min on an RTX 3090), feature collection with the controller driving
   on its privileged latent (15 min), temporal encoder and two DAgger rounds with the encoder in the loop (20 min),
