@@ -1,0 +1,9 @@
+# downloaded / generated data (see scripts/download_checkpoints.sh and tools/motion)
+/data/
+# Unitree robot description (downloaded by scripts/setup_assets.sh)
+source/whole_body_tracking/whole_body_tracking/assets/unitree_description/
+# training outputs
+/logs/
+/outputs/
+__pycache__/
+*.egg-info/

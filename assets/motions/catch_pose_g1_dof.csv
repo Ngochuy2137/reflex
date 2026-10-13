@@ -1,0 +1,32 @@
+# Reflex catch pose: 29 G1 joint angles [rad], MuJoCo/MJCF joint order.
+# Own capture (authors' video -> GVHMR -> GMR retarget -> wrist edits). See README.md.
+joint,value_rad
+left_hip_pitch_joint,0.091075994
+left_hip_roll_joint,0.14063214
+left_hip_yaw_joint,0.21289095
+left_knee_joint,-0.0035373431
+left_ankle_pitch_joint,-0.12187361
+left_ankle_roll_joint,-0.08381144
+right_hip_pitch_joint,0.049847316
+right_hip_roll_joint,-0.14594616
+right_hip_yaw_joint,-0.09734158
+right_knee_joint,0.007862149
+right_ankle_pitch_joint,-0.06459414
+right_ankle_roll_joint,0.23957539
+waist_yaw_joint,-0.040833876
+waist_roll_joint,-0.006045873
+waist_pitch_joint,-0.17005594
+left_shoulder_pitch_joint,-1.00538
+left_shoulder_roll_joint,0.18744913
+left_shoulder_yaw_joint,-0.36084333
+left_elbow_joint,0.53743607
+left_wrist_roll_joint,-2.073833
+left_wrist_pitch_joint,0.0
+left_wrist_yaw_joint,0.0
+right_shoulder_pitch_joint,-0.91908526
+right_shoulder_roll_joint,-0.16981156
+right_shoulder_yaw_joint,0.37615773
+right_elbow_joint,0.38609806
+right_wrist_roll_joint,2.087176
+right_wrist_pitch_joint,0.0
+right_wrist_yaw_joint,0.0

@@ -1,0 +1,6 @@
+data/
+outputs/
+logs/
+.git/
+**/__pycache__/
+source/whole_body_tracking/whole_body_tracking/assets/unitree_description/
