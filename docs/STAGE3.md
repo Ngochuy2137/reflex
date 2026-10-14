@@ -93,8 +93,8 @@ encoders differ slightly between runs; the teacher collections reproduce the lab
 |---|---|---|---|
 | 1 CNN | held-out flight-window latent error `flt_z_mse_std`, best epoch | 0.2115 (epoch 18 of 20) | 0.2095 (epoch 19) |
 | 1 CNN | held-out box position R² (x / y / z) | 0.974 / 0.774 / 0.873 | 0.973 / 0.762 / 0.862 |
-| 3 teacher | `[PERTHROW]` canon s11 / offset s11 / canon s12 / offset s12 | 94/262, 50/154, 97/267, 33/152 | identical |
-| 3 teacher | feature frames per cell | 192k / 96k / 192k / 96k | identical |
+| 3 teacher | `[PERTHROW]` canon s11 / offset s11 / canon s12 / offset s12 | 94/262, 50/154, 97/267, 33/152 | identical on our machine (an external run on another GPU gave e.g. 102/275: individual throws differ across GPUs, the rates match) |
+| 3 teacher | feature frames per cell | 192k / 96k / 192k / 96k | identical on our machine |
 | 4 it0 | best held-out `flt_zw_mse` (576k frames, 961 episodes) | 0.0524 | 0.0509 |
 | 4 DAgger 0 | `[PERTHROW]` canon / offset (encoder it0 in the loop) | 102/285 = 35.8 % / 48/171 = 28.1 % | 110/276 = 39.9 % / 39/159 = 24.5 % |
 | 4 it1 | best held-out `flt_zw_mse` | 0.0530 | 0.0479 |

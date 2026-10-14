@@ -55,6 +55,7 @@ The real-robot deployment stack is not part of this release.
 - About 40 GB of free disk (the Isaac Sim image is ~15 GB).
 
 The paper's results were produced with Isaac Sim 5.1.0, Isaac Lab v2.3.1, rsl-rl-lib 3.0.1 and PyTorch 2.7.0 (CUDA 12.8).
+The release was also run end to end on an RTX 4090 with a pip install of Isaac Sim 5.1 and Isaac Lab 2.3.1 (no Docker).
 
 ## Installation
 
@@ -135,8 +136,8 @@ Expected catch success on the `regular` condition (paper: evaluation seeds 8 and
 `true_z` and `teacher` do not render; on our machine (RTX 3090, the Docker image) this code reproduced
 the paper's per-throw results exactly (checked on seed 8, all 320 throws). On other GPUs or installs the
 individual throws can differ while the pooled rates stay within a point or two. Camera
-rendering in Isaac Sim is not deterministic, so `visual` varies by a few points between runs (a rerun
-of seed 8 with this code gave 90.3).
+rendering in Isaac Sim is not deterministic, so `visual` varies by 1--3 points between runs of the same
+encoder (seed 8 gave 86.6--90.3 across our and an external tester's runs).
 
 ## Training
 
@@ -153,12 +154,10 @@ scripts/train_stage3.sh                                                 # Stage 
 - `scripts/train_stage2.sh bc` writes `data/stage2/bc_init.pt`; the released `data/checkpoints/bc_init_stage2.pt`
   is left untouched. `scripts/train_stage2.sh ppo` starts from the released file by default; pass
   `--init data/stage2/bc_init.pt` to use your own behaviour-cloning result.
-- **Stage 1 note.** The released teacher was trained through a sequence of warm-started runs (paper,
-  Sec. Method); the earlier runs of that sequence are not reproducible. `configs/train/stage1_teacher.env`
-  is the configuration of the final run (600 iterations, 4096 environments). Training from scratch with
-  this configuration does **not** reach the released teacher: in our run the reward kept rising for 2400
-  iterations, but catch success on `regular` stayed at 11--15 % (interception about 32 %) at 600, 1200
-  and 2400 iterations, against 89 % for the released teacher. See `docs/REPRODUCE.md`.
+- **Stage 1 note.** The released teacher (`data/checkpoints/teacher_stage1.pt`) was trained through a
+  sequence of warm-started runs (paper, Sec. Method); `configs/train/stage1_teacher.env` is the configuration
+  of its final run (600 iterations, 4096 environments). Stages 2 and 3 and all evaluations start from the
+  released teacher, which reproduces the paper's teacher numbers (see Evaluation). See `docs/REPRODUCE.md`.
 - **Stage 3.** `scripts/train_stage3.sh` trains the visual encoder for the fixed Stage 2 controller and evaluates it:
   heatmap CNN on 96k rendered RGB-D frames (70 min on an RTX 3090), feature collection with the controller driving
   on its privileged latent (15 min), temporal encoder and two DAgger rounds with the encoder in the loop (20 min),

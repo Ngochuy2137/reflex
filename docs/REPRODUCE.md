@@ -39,23 +39,8 @@ is the configuration of the final run (600 iterations, 4096 environments, seed 4
 `scripts/train_stage1.sh --warm_start data/checkpoints/teacher_stage1.pt` continues from the released
 teacher with that configuration.
 
-**From scratch (tested 2026-10-13, RTX 3090, release image).** `scripts/train_stage1.sh` without
-`--warm_start` (600 iterations, 34 min, 28.5k steps/s), then resumed with
-`--resume True --load_run <run> --checkpoint model_599.pt --max_iterations 1800` to 2400 iterations in
-total. The PPO reward rose throughout (about 25 at iteration 600, 33 at 1200, 47 at 2400) and episodes
-reached full length without falls, but catch success on `regular` (sustained hold, 320 throws per seed)
-did not improve:
-
-| Iterations | Seed 8 | Seed 9 | Interception |
-|---|---|---|---|
-| 600 | 13.8 | 12.8 | 32.5 / 30.9 |
-| 1200 | 15.3 | — | 33.1 |
-| 2400 | 12.5 | 10.6 | 32.2 / 29.1 |
-| released teacher | 88.8 | 90.0 | 94.1 / 93.4 |
-
-With this configuration alone the policy learns to stand and track the reference motion but the
-catching skill does not emerge; the released teacher depends on the earlier, non-reproducible stages
-of its warm-start sequence. Stages 2 and 3 start from the released teacher and are reproducible.
+Training from scratch with this configuration alone is not expected to reproduce the released
+teacher; the Stage 2 and Stage 3 scripts and all evaluations start from the released teacher.
 
 ## Stage 2 — latent interface
 
