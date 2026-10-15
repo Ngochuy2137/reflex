@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="https://toberj.github.io/reflex/static/paper/reflex.pdf"><img src="https://img.shields.io/badge/Paper-PDF-b31b1b.svg" alt="Paper"></a>
+  <a href="https://arxiv.org/abs/2610.12772"><img src="https://img.shields.io/badge/arXiv-2610.12772-b31b1b.svg" alt="arXiv"></a>
   <a href="https://toberj.github.io/reflex/"><img src="https://img.shields.io/badge/Project%20Page-Reflex-6b4fa0.svg" alt="Project page"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT license"></a>
 </p>
@@ -198,10 +199,13 @@ Training data includes Motion Data by [Bones Studio](https://bones.studio/) and 
 ## Citation
 
 ```bibtex
-@misc{jia2026reflex,
-  title   = {Reflex: Visually Grounded Reactive Humanoid Control},
-  author  = {Jia, Taoyang and Huang, Weikai and Song, Linxin and Darlington, Jared and
-             Zhao, Jieyu and Wang, Yue and Duan, Jiafei and Ren, Zhongzheng and Krishna, Ranjay},
-  year    = {2026}
+@misc{jia2026reflexvisuallygroundedreactive,
+      title={Reflex: Visually Grounded Reactive Humanoid Control},
+      author={Taoyang Jia and Weikai Huang and Linxin Song and Jared Darlington and Jieyu Zhao and Yue Wang and Jiafei Duan and Zhongzheng Ren and Ranjay Krishna},
+      year={2026},
+      eprint={2610.12772},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2610.12772},
 }
 ```
