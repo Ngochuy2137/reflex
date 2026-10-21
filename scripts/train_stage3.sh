@@ -9,14 +9,14 @@
 #              it<k> driving the controller (seed 7, canon + offset), retrain it<k+1> on all features so far   (~20 min)
 #   5 eval     CLEAN2 evaluation of the final encoder: scripts/eval.sh visual --seed 8                           (~4 min)
 # Every output is written under a temporary name and renamed when its step succeeds; a step whose output exists is
-# skipped, so rerunning the same command resumes. Outputs are reused by name: use a new --run after changing inputs.
+# skipped when --out selects the same folder. Use a new output folder after changing inputs.
 #
 # usage: scripts/train_stage3.sh [--run NAME] [--out DIR] [--frames DIR] [--labels FILE] [--controller CKPT]
 #                                [--cnn CKPT] [--zw NPZ] [--rounds N] [--no_eval] [--print_config] [--gui] [--num_envs N]
 #   --gui           open simulator windows during collection and evaluation; default is headless
 #   --num_envs      override both collection block sizes and the final evaluation size
 #   --logger wandb --log_project_name reflex --wandb_group NAME [--wandb_mode online|offline]
-#   --run           outputs go to $DATA/stage3/<run>/ (default: default)
+#   --run           outputs go to logs/stage3/<run>_<timestamp>/ (default run: default)
 #   --out           output directory (overrides --run)
 #   --frames        rendered frame set of step 1: chunk_*.npz + label file (default: $DATA/stage3/frames/v10_s7_rgbd)
 #   --labels        label file inside --frames (default: labels_v10.npz)
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do case $1 in
 if [ -n "$ENV_COUNT" ] && { [[ ! "$ENV_COUNT" =~ ^[1-9][0-9]*$ ]]; }; then
   echo '--num_envs must be a positive integer' >&2; exit 1
 fi
-[ -n "$OUT" ] || OUT=$DATA/stage3/$RUN
+[ -n "$OUT" ] || OUT="$ROOT/logs/stage3/${RUN}_$(date +%Y-%m-%d_%H-%M-%S)"
 abspath () { case $1 in ""|/*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }   # the script works from the repo root
 OUT=$(abspath "$OUT"); FRAMES=$(abspath "$FRAMES"); CTRL=$(abspath "$CTRL"); CNN=$(abspath "$CNN"); ZW=$(abspath "$ZW")
 CFG=$ROOT/configs/train
@@ -81,6 +81,7 @@ need "$CTRL" "$ZW" "$MOTION" "$URDF"
 [ "$LOGGER" != tensorboard ] || { echo 'Stage 3 supports --logger none or wandb' >&2; exit 1; }
 [ -n "$WB_GROUP" ] || WB_GROUP=$RUN
 setup_logging "$LOGGER" "$PROJECT" "$WB_GROUP" "$WB_MODE" "$RUN" stage3
+echo "[stage3] Output folder: $OUT"
 mkdir -p "$OUT/collect" "$OUT/logs"
 cd "$ROOT"
 log () { echo "[stage3 $(date +%H:%M)] $*"; }

@@ -50,7 +50,7 @@ configuration (`configs/train/stage2_latent.env`, `stage2_bc_perception.env`). B
 rerun against the paper, evaluate it with `scripts/eval.sh true_z --ckpt <your model_599.pt>`; the
 released controller gives 88.4 on `regular` (640 throws).
 
-`bc` writes to `data/stage2/bc_init.pt` and never overwrites the released `bc_init_stage2.pt`; `ppo`
+`bc` writes to `logs/stage2_bc/<run_name>_<timestamp>/bc_init.pt` and never overwrites the released `bc_init_stage2.pt`; `ppo`
 starts from the released file unless `--init` is given.
 
 ## Stage 3 — visual encoder
