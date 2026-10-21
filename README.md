@@ -215,14 +215,19 @@ scripts/train_stage2.sh ppo                                             # Stage 
 scripts/train_stage3.sh                                                 # Stage 3: visual encoder + its evaluation (~1 h 50 min)
 ```
 
-All new training outputs default to `logs/`. Folder names put the run name before
-the timestamp. Existing files stay in their current locations; explicit `--out` paths
+All new training outputs default to `logs/`. Each run has its own folder, with
+`stage1_<timestamp>`, `stage2_bc_<timestamp>`, `stage2_ppo_<timestamp>` and
+`stage3_<timestamp>` inside it. Explicit `--out` paths
 are still supported. Downloaded checkpoints and input frames stay under `data/`.
 
-- PPO outputs go to `logs/rsl_rl/reflex/<run_name>_<timestamp>/` (TensorBoard logs and `model_<it>.pt`).
-- `scripts/train_stage2.sh bc` writes `logs/stage2_bc/<run_name>_<timestamp>/bc_init.pt`; the released `data/checkpoints/bc_init_stage2.pt`
+- Stage 1 PPO outputs go to `logs/<run_name>/stage1_<timestamp>/`.
+- Stage 2 PPO outputs go to `logs/<run_name>/stage2_ppo_<timestamp>/`.
+  Both folders contain TensorBoard logs, configuration files and `model_<it>.pt`.
+  To resume, use the same `--run_name` and select a stage folder with `--load_run`.
+  Automatic lookup only considers folders for the current stage.
+- `scripts/train_stage2.sh bc` writes `logs/<run_name>/stage2_bc_<timestamp>/bc_init.pt`; the released `data/checkpoints/bc_init_stage2.pt`
   is left untouched. `scripts/train_stage2.sh ppo` starts from the released file by default; pass
-  `--init logs/stage2_bc/YOUR_BC_RUN/bc_init.pt` to use your own behaviour-cloning result.
+  `--init logs/YOUR_RUN/stage2_bc_TIMESTAMP/bc_init.pt` to use your own behaviour-cloning result.
 - **Stage 1 note.** The released teacher (`data/checkpoints/teacher_stage1.pt`) was trained through a
   sequence of warm-started runs (paper, Sec. Method); `configs/train/stage1_teacher.env` is the configuration
   of its final run (600 iterations, 4096 environments). Stages 2 and 3 and all evaluations start from the
@@ -230,8 +235,8 @@ are still supported. Downloaded checkpoints and input frames stay under `data/`.
 - **Stage 3.** `scripts/train_stage3.sh` trains the visual encoder for the fixed Stage 2 controller and evaluates it:
   heatmap CNN on 96k rendered RGB-D frames (70 min on an RTX 3090), feature collection with the controller driving
   on its privileged latent (15 min), temporal encoder and two DAgger rounds with the encoder in the loop (20 min),
-  `scripts/eval.sh visual --seed 8` (4 min). The result is `logs/stage3/default_<timestamp>/visual_encoder.pt`; a full run gave
-  90.3 / 90.9 % on seeds 8 / 9 (released encoder: 89.1 / 88.4). Pass `--out logs/stage3/YOUR_STAGE3_RUN` to resume an existing output folder. The first step reads the rendered frame set (2.1 GB) from `data/stage3/frames/v10_s7_rgbd/`
+  `scripts/eval.sh visual --seed 8` (4 min). The result is `logs/default/stage3_<timestamp>/visual_encoder.pt`; a full run gave
+  90.3 / 90.9 % on seeds 8 / 9 (released encoder: 89.1 / 88.4). Pass `--out logs/YOUR_RUN/stage3_TIMESTAMP` to resume an existing output folder. The first step reads the rendered frame set (2.1 GB) from `data/stage3/frames/v10_s7_rgbd/`
   (`chunk_0000.npz` … `chunk_0011.npz` + `labels_v10.npz`), downloaded by `scripts/download_stage3_frames.sh`;
   see [`docs/STAGE3.md`](docs/STAGE3.md), which also lists the reference numbers of every step. `--cnn data/checkpoints/stage3_heatmap_cnn.pt` skips the first
   step and needs no frames (~40 min in total).
@@ -260,15 +265,15 @@ Each training process creates a separate run in the same group:
 | Evaluation | Throw/catch/fall counts and success rates after evaluation completes |
 
 Stage 3 data collection does not create a separate W&B run. Its CNN and encoder
-URLs appear in `logs/stage3/<run>_<timestamp>/logs/`. Skipped training steps create no new run.
+URLs appear in `logs/<run>/stage3_<timestamp>/logs/`. Skipped training steps create no new run.
 Evaluation rates use fractions from 0 to 1; no rate is logged when no throws were observed.
 
-You can also select logging per command. Create `RUN`, `BC_DIR` and the BC checkpoint first,
+You can also select logging per command. Create `RUN`, `BC_CKPT` and the BC checkpoint first,
 as shown in the next section:
 
 ```bash
 bash scripts/train_stage2.sh ppo \
-  --init "$BC_DIR/bc_init.pt" --run_name "$RUN" \
+  --init "$BC_CKPT" --run_name "$RUN" \
   --logger wandb --log_project_name reflex --wandb_group "$RUN"
 ```
 
@@ -293,58 +298,59 @@ Choose a new experiment name for each fresh run:
 
 ```bash
 RUN=experiment_01
-BC_DIR="logs/stage2_bc/${RUN}_$(date +%Y-%m-%d_%H-%M-%S)"
 
 # Stage 2 BC: learn from the Stage 1 teacher and save a new BC model.
 # Feed your trained policy of stage 1 to stage 2 BC training through parameter --teacher 
 bash scripts/train_stage2.sh bc \
-  --teacher data/checkpoints/teacher_stage1.pt --run_name "$RUN" \
-  --out "$BC_DIR/bc_init.pt"
+  --teacher data/checkpoints/teacher_stage1.pt --run_name "$RUN"
+
+# Copy the actual BC output path printed by the script; replace TIMESTAMP below.
+BC_CKPT="logs/$RUN/stage2_bc_TIMESTAMP/bc_init.pt"
 
 # Stage 2 PPO: start from that BC model, not the released BC model.
+# use wandb logger if you want
+export REFLEX_LOGGER=wandb
+export WANDB_PROJECT=reflex
+export WANDB_RUN_GROUP="$RUN"
 # Feed your trained policy of stage 2 BC to stage 2 PPO training through parameter --init 
-
 bash scripts/train_stage2.sh ppo \
-  --init "$BC_DIR/bc_init.pt" --run_name "$RUN"
+  --init "$BC_CKPT" --run_name "$RUN"
 ```
 
-PPO saves models under `logs/rsl_rl/reflex/experiment_01_<timestamp>/`.
+PPO saves models under `logs/experiment_01/stage2_ppo_<timestamp>/`.
 After PPO finishes, set the actual path to the checkpoint you want to use:
 
 ```bash
-# Replace YOUR_PPO_RUN with the folder created above.
-STAGE2_CKPT=logs/rsl_rl/reflex/YOUR_PPO_RUN/model_599.pt
+# Replace TIMESTAMP with the timestamp of your Stage 2 PPO folder.
+STAGE2_CKPT=logs/$RUN/stage2_ppo_TIMESTAMP/model_599.pt
 
-# Compute Stage 3 loss weights for this Stage 2 controller.
-STAGE3_DIR="logs/stage3/${RUN}_$(date +%Y-%m-%d_%H-%M-%S)"
-mkdir -p "$STAGE3_DIR"
-(
-  source scripts/_common.sh
-  load_env configs/train/stage3_collect.env configs/train/stage3_throw_canon.env configs/train/stage3_teacher_boxmix.env
-  export G1_URDF_OVERRIDE="$(pwd)/source/whole_body_tracking/whole_body_tracking/assets/unitree_description/urdf/g1/main_hands.urdf"
-  "$ISAACLAB_PY" -m reflex.vision.latent_weights --headless \
-    --bm_ckpt "$STAGE2_CKPT" \
-    --motion_file data/motions/walk_then_catch_v17_30s.npz \
-    --zw_out "$STAGE3_DIR/latent_weights.npz" \
-    --out "$STAGE3_DIR/latent_probe.json"
-)
-
-# Stage 3: train the image network and visual encoder for your controller.
-# Skip the download if the frame set is already present.
+# Stage 3 computes controller-specific weights and creates its output folder.
+# Download dataset (Skip the download if the frame set is already present.)
 bash scripts/download_stage3_frames.sh
-bash scripts/train_stage3.sh --run "$RUN" --out "$STAGE3_DIR" \
-  --controller "$STAGE2_CKPT" --zw "$STAGE3_DIR/latent_weights.npz"
+
+# use wandb logger if you want
+export REFLEX_LOGGER=wandb
+export WANDB_PROJECT=reflex
+export WANDB_RUN_GROUP="$RUN"
+
+# Train
+bash scripts/train_stage3.sh --run "$RUN" \
+  --controller "$STAGE2_CKPT" --compute_weights
 ```
 
-The final visual model is `$STAGE3_DIR/visual_encoder.pt`.
+The scripts create timestamps automatically. You only choose existing input
+checkpoint paths; do not create timestamped output folders in the shell.
+Stage 3 prints its output folder, with `latent_weights.npz`, `latent_probe.json`
+and the final `visual_encoder.pt` inside it.
 Add `--gui` to the BC, PPO, or Stage 3 command for a window. `--num_envs` changes
 training/collection sizes, not just how many robots are shown.
 To reuse the released image network, skip the frame download and add
 `--cnn data/checkpoints/stage3_heatmap_cnn.pt` to Stage 3.
 
-Keep `--init`, `--controller`, and `--zw` when connecting your own outputs;
-omitting them selects released models or weights. A new controller needs its
-own loss weights. The author did not include this custom-controller weight
+Keep `--init` and `--controller` when connecting your own outputs. Use
+`--compute_weights` for a new controller, or `--zw` to reuse its existing weights;
+these two options cannot be combined. Without either option, Stage 3 uses the
+released weights. The author did not include this custom-controller weight
 calculation in their reproduction check; see
 [Using another controller](docs/STAGE3.md#using-another-controller).
 Stage 3 reuses existing outputs by filename, so use a new output folder after changing inputs. To resume, pass the same `--out` folder.

@@ -16,13 +16,14 @@
 #   --gui           open simulator windows during collection and evaluation; default is headless
 #   --num_envs      override both collection block sizes and the final evaluation size
 #   --logger wandb --log_project_name reflex --wandb_group NAME [--wandb_mode online|offline]
-#   --run           outputs go to logs/stage3/<run>_<timestamp>/ (default run: default)
+#   --run           outputs go to logs/<run>/stage3_<timestamp>/ (default run: default)
 #   --out           output directory (overrides --run)
 #   --frames        rendered frame set of step 1: chunk_*.npz + label file (default: $DATA/stage3/frames/v10_s7_rgbd)
 #   --labels        label file inside --frames (default: labels_v10.npz)
 #   --controller    Stage 2 controller (default: data/checkpoints/latent_stage2.pt)
 #   --cnn           use this heatmap CNN and skip step 1 (e.g. data/checkpoints/stage3_heatmap_cnn.pt)
 #   --zw            per-dimension latent loss weights for --controller (default: data/checkpoints/stage3_latent_weights.npz)
+#   --compute_weights  compute controller-specific weights in the output folder instead of using --zw
 #   --rounds        DAgger rounds (default: 2); the final encoder is it<rounds>, copied to <out>/visual_encoder.pt
 #   --no_eval       skip step 5
 #   --print_config  print the effective configuration of the four collection cells and exit
@@ -31,13 +32,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 RUN=default; OUT=""; FRAMES=$DATA/stage3/frames/v10_s7_rgbd; LABELS=labels_v10.npz
 CTRL=$DATA/checkpoints/latent_stage2.pt; CNN=""; ZW=$DATA/checkpoints/stage3_latent_weights.npz
-ROUNDS=2; EVAL=1; PRINT=0
+ROUNDS=2; EVAL=1; PRINT=0; COMPUTE_WEIGHTS=0; ZW_SET=0
 ENV_COUNT=""; VIEW_ARGS=(--headless); EVAL_ARGS=()
 LOGGER=${REFLEX_LOGGER:-none}; PROJECT=${WANDB_PROJECT:-reflex}
 WB_GROUP=${WANDB_RUN_GROUP:-}; WB_MODE=online
 while [ $# -gt 0 ]; do case $1 in
   --run) RUN=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --frames) FRAMES=$2; shift 2 ;; --labels) LABELS=$2; shift 2 ;;
-  --controller) CTRL=$2; shift 2 ;; --cnn) CNN=$2; shift 2 ;; --zw) ZW=$2; shift 2 ;; --rounds) ROUNDS=$2; shift 2 ;;
+  --controller) CTRL=$2; shift 2 ;; --cnn) CNN=$2; shift 2 ;; --zw) ZW=$2; ZW_SET=1; shift 2 ;; --rounds) ROUNDS=$2; shift 2 ;;
+  --compute_weights) COMPUTE_WEIGHTS=1; shift ;;
   --no_eval) EVAL=0; shift ;; --print_config) PRINT=1; shift ;;
   --gui) VIEW_ARGS=(--gui); EVAL_ARGS+=(--gui); shift ;;
   --num_envs) ENV_COUNT=$2; shift 2 ;;
@@ -48,7 +50,10 @@ while [ $# -gt 0 ]; do case $1 in
 if [ -n "$ENV_COUNT" ] && { [[ ! "$ENV_COUNT" =~ ^[1-9][0-9]*$ ]]; }; then
   echo '--num_envs must be a positive integer' >&2; exit 1
 fi
-[ -n "$OUT" ] || OUT="$ROOT/logs/stage3/${RUN}_$(date +%Y-%m-%d_%H-%M-%S)"
+if [ "$COMPUTE_WEIGHTS" = 1 ] && [ "$ZW_SET" = 1 ]; then
+  echo 'Choose --compute_weights or --zw, not both' >&2; exit 1
+fi
+[ -n "$OUT" ] || OUT="$ROOT/logs/${RUN}/stage3_$(date +%Y-%m-%d_%H-%M-%S)"
 abspath () { case $1 in ""|/*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }   # the script works from the repo root
 OUT=$(abspath "$OUT"); FRAMES=$(abspath "$FRAMES"); CTRL=$(abspath "$CTRL"); CNN=$(abspath "$CNN"); ZW=$(abspath "$ZW")
 CFG=$ROOT/configs/train
@@ -77,7 +82,12 @@ if [ $PRINT = 1 ]; then
   exit 0
 fi
 
-need "$CTRL" "$ZW" "$MOTION" "$URDF"
+need "$CTRL" "$MOTION" "$URDF"
+if [ "$COMPUTE_WEIGHTS" = 1 ]; then
+  ZW=$OUT/latent_weights.npz
+else
+  need "$ZW"
+fi
 [ "$LOGGER" != tensorboard ] || { echo 'Stage 3 supports --logger none or wandb' >&2; exit 1; }
 [ -n "$WB_GROUP" ] || WB_GROUP=$RUN
 setup_logging "$LOGGER" "$PROJECT" "$WB_GROUP" "$WB_MODE" "$RUN" stage3
@@ -87,6 +97,24 @@ cd "$ROOT"
 log () { echo "[stage3 $(date +%H:%M)] $*"; }
 # Save full output while showing phase progress in the terminal.
 progress_log () { tee "$1" | awk '/^\[progress\]/ { print; fflush() }'; }
+
+# Compute weights in the same automatically named folder as the trained models.
+if [ "$COMPUTE_WEIGHTS" = 1 ]; then
+  if [ -f "$ZW" ]; then
+    log "weights: exists, skipped ($ZW)"
+  else
+    log "weights: computing for $CTRL (log: $OUT/logs/latent_weights.log)"
+    ( load_env "$CFG/stage3_collect.env" "$CFG/stage3_throw_canon.env" "$CFG/stage3_teacher_boxmix.env"
+      export G1_URDF_OVERRIDE=$URDF
+      $PY -m reflex.vision.latent_weights --headless --bm_ckpt "$CTRL" --motion_file "$MOTION" \
+        --zw_out "$ZW.partial.npz" --out "$OUT/latent_probe.json"
+    ) > "$OUT/logs/latent_weights.log" 2>&1 \
+      || { log 'weights: FAILED, see latent_weights.log'; exit 1; }
+    need "$ZW.partial.npz"
+    mv "$ZW.partial.npz" "$ZW"
+    log "weights: saved $ZW"
+  fi
+fi
 
 # ---- 1) heatmap CNN (skipped with --cnn)
 if [ -z "$CNN" ]; then

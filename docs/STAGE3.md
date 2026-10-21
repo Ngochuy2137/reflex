@@ -17,20 +17,20 @@ controller runs in simulation, first driven by its own privileged latent and the
 Run from the Reflex root inside the container.
 
 ```bash
-STAGE3_DIR="logs/stage3/default_$(date +%Y-%m-%d_%H-%M-%S)"
-scripts/train_stage3.sh --out "$STAGE3_DIR"  # all steps (~1 h 50 min on one RTX 3090)
+scripts/train_stage3.sh --run default  # all steps (~1 h 50 min on one RTX 3090)
 scripts/train_stage3.sh --run from_cnn --cnn data/checkpoints/stage3_heatmap_cnn.pt   # reuse the released CNN (~40 min, no frame set needed)
-scripts/eval.sh visual --detector "$STAGE3_DIR/visual_encoder.pt" --condition dist_5m --seed 9      # any other condition
+# Replace TIMESTAMP with the output folder printed by training.
+scripts/eval.sh visual --detector logs/default/stage3_TIMESTAMP/visual_encoder.pt --condition dist_5m --seed 9      # any other condition
 ```
 
 A step whose output exists is skipped, so passing the same `--out` folder resumes after the last completed step (outputs
 are written under a temporary name and renamed when the step succeeds). Outputs are reused by name only: start a new
-output folder after changing an input. By default, each call creates `logs/stage3/<run>_<timestamp>/`. `scripts/train_stage3.sh --print_config` prints the configuration of the four
+output folder after changing an input. By default, each call creates `logs/<run>/stage3_<timestamp>/`. `scripts/train_stage3.sh --print_config` prints the configuration of the four
 collection cells. Options: see the header of the script.
 
 ## Steps
 
-| # | Step | Code | Output in `logs/stage3/<run>_<timestamp>/` | Time (RTX 3090) |
+| # | Step | Code | Output in `logs/<run>/stage3_<timestamp>/` | Time (RTX 3090) |
 |---|---|---|---|---|
 | 1 | Heatmap CNN on the rendered frame set: 20 epochs, colour augmentation of the box (p = 0.7), flight frames up-weighted, best epoch by flight-window latent error | `reflex.vision.train_detector` | `heatmap_cnn.pt` | 70 min |
 | 2 | Feature extractor: the CNN wrapped into a `kpseq` checkpoint (its GRU is untrained and unused) | `reflex.vision.make_feature_net` | `feature_net.pt` | seconds |
@@ -39,7 +39,7 @@ collection cells. Options: see the header of the script.
 | 4 | DAgger, 2 rounds: collect with `it<k>` driving the controller (seed 7, `canon` + `offset`), retrain `it<k+1>` from scratch on all features so far | both | `collect/dagger<k>_*`, `encoder_it{1,2}.pt` | 20 min |
 | 5 | Final encoder `visual_encoder.pt` (= `encoder_it2.pt`); CLEAN2 evaluation, regular box, seed 8 (`scripts/eval.sh visual`) | `reflex.eval.per_throw_eval` | `eval/visual_regular_s8.json` | 4 min |
 
-Logs of every step are in `logs/stage3/<run>_<timestamp>/logs/`. The `*.shadow.npz` files of the teacher collection are a
+Logs of every step are in `logs/<run>/stage3_<timestamp>/logs/`. The `*.shadow.npz` files of the teacher collection are a
 diagnostic by-product of the shadow mode and are not used.
 
 **Resources.** Step 1 holds the whole frame set in memory (about 14 GB of RAM) and uses about 8 GB of GPU memory.
@@ -115,7 +115,11 @@ rerun of the released encoder with this code gave 90.3 % on seed 8.
 
 Steps 2–5 roll out the controller given with `--controller` and regress its latent; the CNN of step 1 is not tied to
 it, so the released CNN can be reused: `--cnn data/checkpoints/stage3_heatmap_cnn.pt --controller <your Stage 2
-checkpoint>`. The per-dimension loss weights (`--zw`) belong to the controller; `reflex.vision.latent_weights --zw_out`
-computes them from the decoder's sensitivity to each latent dimension (this was not part of the reproduction check
+checkpoint>`. Add `--compute_weights` to compute controller-specific weights inside the
+automatically created output folder before training. This calls `reflex.vision.latent_weights --zw_out`
+and computes them from the decoder's sensitivity to each latent dimension (this was not part of the reproduction check
 above). The collection configuration matches the released controller's latent observation (`BOX_LATENT_*` in
 `stage3_collect.env`); a controller trained with other latent settings needs them changed there too.
+
+Use `--zw` instead to reuse existing weights. Do not combine it with `--compute_weights`.
+On resume, `--compute_weights --out <existing folder>` reuses the weights already in that folder.

@@ -8,7 +8,7 @@
 # Headless is the default. --gui needs a working desktop display connection.
 # Logging: --logger wandb --log_project_name reflex --wandb_group NAME [--wandb_mode online|offline]
 # Defaults reproduce the released controller (data/checkpoints/latent_stage2.pt):
-#   bc  writes logs/stage2_bc/<run_name>_<timestamp>/bc_init.pt (the released data/checkpoints/bc_init_stage2.pt is never overwritten);
+#   bc  writes logs/<run_name>/stage2_bc_<timestamp>/bc_init.pt (the released data/checkpoints/bc_init_stage2.pt is never overwritten);
 #   ppo starts from the released data/checkpoints/bc_init_stage2.pt unless --init points at your own bc output.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -45,7 +45,7 @@ case $STEP in
     # the teacher is queried with ground-truth box channels during behaviour cloning
     load_env "$ROOT/configs/train/stage2_latent.env" "$ROOT/configs/train/stage2_bc_perception.env"
     setup_logging "$LOGGER" "$PROJECT" "$WB_GROUP" "$WB_MODE" "${RUN}_stage2_bc" stage2_bc
-    [ -n "$BC_OUT" ] || BC_OUT="$ROOT/logs/stage2_bc/${RUN}_$(date +%Y-%m-%d_%H-%M-%S)/bc_init.pt"
+    [ -n "$BC_OUT" ] || BC_OUT="$ROOT/logs/${RUN}/stage2_bc_$(date +%Y-%m-%d_%H-%M-%S)/bc_init.pt"
     echo "[stage2 bc] Model output: $BC_OUT"
     mkdir -p "$(dirname "$BC_OUT")"
     $PY -m reflex.latent.bc_init "${BC_VIEW_ARGS[@]}" --motion_file "$MOTION" --num_envs "${NENV:-512}" --steps 800 --rounds 5 --epochs 8 \
