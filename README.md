@@ -206,13 +206,6 @@ BC uses `--teacher` for a Stage 1 checkpoint. PPO uses `--init` for a Stage 2
 BC checkpoint. See [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
 for a sequence that keeps your outputs separate from the released models.
 
-Stage 2 PPO also prints completed/total iterations, average iteration time,
-estimated remaining time and estimated total time. Estimates use wall-clock time
-since the current training call started, divided by completed iterations. They
-include earlier logging/checkpoint overhead, exclude simulator setup before training,
-and restart when training resumes. Final checkpoint saving may take extra time.
-The same estimates are logged under `Perf/` in TensorBoard or W&B.
-
 How the released checkpoints were produced and what a rerun is expected to give: [`docs/REPRODUCE.md`](docs/REPRODUCE.md).
 
 ```bash

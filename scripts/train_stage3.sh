@@ -85,6 +85,8 @@ echo "[stage3] Output folder: $OUT"
 mkdir -p "$OUT/collect" "$OUT/logs"
 cd "$ROOT"
 log () { echo "[stage3 $(date +%H:%M)] $*"; }
+# Save full output while showing phase progress in the terminal.
+progress_log () { tee "$1" | awk '/^\[progress\]/ { print; fflush() }'; }
 
 # ---- 1) heatmap CNN (skipped with --cnn)
 if [ -z "$CNN" ]; then
@@ -95,7 +97,7 @@ if [ -z "$CNN" ]; then
     log "1 cnn: training on $FRAMES (log: $OUT/logs/heatmap_cnn.log)"; t0=$SECONDS
     WANDB_NAME="${RUN}_stage3_cnn" $PY -m reflex.vision.train_detector --frames_dir "$FRAMES" --labels "$LABELS" --out "$CNN.partial" \
       --epochs 20 --bs 32 --w_kl 0 --w_flight 8 --flight_select --arch kp --depth --w_uv 1.0 --color_aug 0.7 \
-      > "$OUT/logs/heatmap_cnn.log" 2>&1 || { log "1 cnn: FAILED, see $OUT/logs/heatmap_cnn.log"; exit 1; }
+      2>&1 | progress_log "$OUT/logs/heatmap_cnn.log" || { log "1 cnn: FAILED, see $OUT/logs/heatmap_cnn.log"; exit 1; }
     grep -aq "\[det\] DONE" "$OUT/logs/heatmap_cnn.log" || { log "1 cnn: no DONE line, see $OUT/logs/heatmap_cnn.log"; exit 1; }
     mv "$CNN.partial" "$CNN"
     log "1 cnn: done in $(( (SECONDS - t0) / 60 )) min: $(grep -a '\[det\] DONE' "$OUT/logs/heatmap_cnn.log" | cut -c1-160)"
@@ -125,7 +127,7 @@ collect () {
   ( load_env $(layers "$kind" "$blk"); export G1_URDF_OVERRIDE=$URDF
     $PY -m reflex.eval.per_throw_eval "${VIEW_ARGS[@]}" --num_envs "${NENV[$blk]}" --seed "$seed" --env_id Reflex-Latent-G1-v0 \
       --motion_file "$MOTION" --bm_ckpt "$CTRL" --detector "$enc" "${extra[@]}" \
-      --save_feats "$c.partial.npz" --out "$c.json" ) > "$OUT/logs/$tag.log" 2>&1 \
+      --save_feats "$c.partial.npz" --out "$c.json" ) 2>&1 | progress_log "$OUT/logs/$tag.log" \
     || { log "  $tag: FAILED, see $OUT/logs/$tag.log"; exit 1; }
   grep -aq "^\[PERTHROW\] catch rate" "$OUT/logs/$tag.log" && [ -f "$c.partial.npz" ] \
     || { log "  $tag: incomplete, see $OUT/logs/$tag.log"; exit 1; }
@@ -139,7 +141,7 @@ train_encoder () {
   if [ -f "$enc" ]; then log "  it$1: exists, skipped"; return; fi
   log "  it$1: training on $(echo "${SETS#,}" | tr ',' '\n' | wc -l) feature sets (log: $lg)"; local t0=$SECONDS
   WANDB_NAME="${RUN}_stage3_encoder_it$1" $PY -m reflex.vision.train_seqdet --frames_dir none --labels none --feat_sets "${SETS#,}" --kp "$CNN" --zdim 8 \
-    --zw "$ZW" --out "$enc.partial" > "$lg" 2>&1 || { log "  it$1: FAILED, see $lg"; exit 1; }
+    --zw "$ZW" --out "$enc.partial" 2>&1 | progress_log "$lg" || { log "  it$1: FAILED, see $lg"; exit 1; }
   grep -aq "\[seq\] DONE" "$lg" || { log "  it$1: no DONE line, see $lg"; exit 1; }
   mv "$enc.partial" "$enc"
   log "  it$1: done in $(( (SECONDS - t0) / 60 )) min | $(grep -a '\[seq\] DONE' "$lg" | sed 's/ -> .*//' | cut -c1-170)"
@@ -170,7 +172,7 @@ if [ $EVAL = 1 ]; then
     "$ROOT/scripts/eval.sh" visual "${EVAL_ARGS[@]}" --logger "$LOGGER" --log_project_name "$PROJECT" \
       --wandb_group "$WB_GROUP" --wandb_mode "$WB_MODE" \
       --ckpt "$CTRL" --detector "$OUT/visual_encoder.pt" --seed 8 --out "$EV.partial" \
-      > "$OUT/logs/eval_regular_s8.log" 2>&1 || { log "5 eval: FAILED, see $OUT/logs/eval_regular_s8.log"; exit 1; }
+      2>&1 | progress_log "$OUT/logs/eval_regular_s8.log" || { log "5 eval: FAILED, see $OUT/logs/eval_regular_s8.log"; exit 1; }
     mv "$EV.partial" "$EV"
     log "5 eval: done in $(( (SECONDS - t0) / 60 )) min"
   fi

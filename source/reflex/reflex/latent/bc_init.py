@@ -55,6 +55,7 @@ colmask = torch.zeros_like(W0); colmask[:, ac.keep:] = 1.0
 opt = torch.optim.Adam(train_p + [W0], lr=a.lr)
 OBS = []
 from reflex.utils.experiment_logging import ExperimentLogger
+from reflex.utils.training_time import ProgressTimer
 logger = ExperimentLogger('stage2_bc', vars(a))
 log_step = 0
 
@@ -71,6 +72,7 @@ def fit(tag, epochs=None, cosine=False):
             d = torch.cat([(ac.actor(ac.features(o[i:i + 131072])) - A[idx[i:i + 131072]]) ** 2 for i in range(0, len(idx), 131072)])
             return float(d[m].mean()) if bool(m.any()) else float("nan")
     l0, l0f = loss_on(te), loss_on(te, True)
+    progress = ProgressTimer(f'Stage 2 BC {tag}: learning', epochs, unit='epochs')
     for ep in range(epochs):
         loss_total = 0.0; batch_count = 0
         if cosine:
@@ -84,10 +86,11 @@ def fit(tag, epochs=None, cosine=False):
             opt.zero_grad(); loss.backward(); W0.grad.mul_(colmask); opt.step()
             if logger.run is not None:
                 loss_total += loss.detach(); batch_count += 1
+        timing = progress.update(ep + 1)
         if logger.run is not None:
             log_step += 1
             logger.log({'train/loss': float(loss_total) / max(batch_count, 1),
-                        'train/samples': N, 'train/epoch_in_round': ep + 1}, step=log_step)
+                        'train/samples': N, 'train/epoch_in_round': ep + 1, **timing}, step=log_step)
     l1, l1f = loss_on(te), loss_on(te, True)
     print(f"[bc] {tag}: samples {N} (box visible {float(box_on.float().mean()):.2f})  held-out action MSE all {l0:.5f} -> {l1:.5f} | "
           f"box-visible {l0f:.5f} -> {l1f:.5f}", flush=True)
@@ -97,12 +100,16 @@ def fit(tag, epochs=None, cosine=False):
                 'data/box_visible_fraction': float(box_on.float().mean()), 'data/samples': N}, step=log_step)
 
 for r in range(a.rounds):
+    print(f'[bc] Round {r + 1}/{a.rounds}', flush=True)
+    collection_progress = ProgressTimer(f'Stage 2 BC round {r + 1}/{a.rounds}: collection',
+                                       a.steps, every=max(1, a.steps // 10))
     ac.eval()
     with torch.no_grad():
         for t in range(a.steps):
             o = obs["policy"]; OBS.append(o.clone())
             act = teacher(o[:, :170]) if (r == 0 and not a.init_from) else ac.actor(ac.features(o))
             obs, _, _, _, _ = env.step(act)
+            collection_progress.update(t + 1)
     fit(f"round {r} ({'teacher' if r == 0 else 'student'} drove)")
 if a.final_epochs > 0: fit(f"final {a.final_epochs} epochs, cosine lr", epochs=a.final_epochs, cosine=True)
 with torch.no_grad():

@@ -143,6 +143,8 @@ def evaluate(idx_all):
 t0 = time.time(); best = None
 from reflex.utils.experiment_logging import ExperimentLogger
 logger = ExperimentLogger('stage3_cnn', vars(a))
+from reflex.utils.training_time import ProgressTimer
+progress = ProgressTimer('Stage 3 CNN', a.epochs, unit='epochs')
 for ep in range(a.epochs):
     perm = np.random.permutation(len(tr_w)); tot = 0.0; nb = 0
     for i in range(0, len(perm), a.bs):
@@ -166,11 +168,12 @@ for ep in range(a.epochs):
         loss = l_z + a.w_aux * l_aux + a.w_den * l_den + a.w_kl * l_kl + a.w_uv * l_uv
         opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step(); sched.step(); tot += float(loss); nb += 1
     ev = evaluate(te_w); print(f"[det] epoch {ep+1}/{a.epochs} loss {tot/max(nb,1):.4f}  test {json.dumps(ev)}  {time.time()-t0:.0f}s", flush=True)
-    logger.log({'train/loss': tot/max(nb, 1), 'test': ev,
-                'data/train_windows': len(tr_w), 'data/test_windows': len(te_w)}, step=ep + 1)
     key = "flt_z_mse_std" if a.flight_select else "z_mse_std"
     if best is None or ev[key] < best[key]:
         best = dict(ev, epoch=ep + 1); torch.save({"model": model.state_dict(), "arch": a.arch, "in_ch": IN_CH, "win": a.win, "zdim": ZD, "live": live.tolist(), "eval": best,
                                                   "aux_norm": dict(pmean=zmean.tolist(), pstd=zstd.tolist(), vmean=vmean.tolist(), vstd=vstd.tolist())}, a.out)
+    logger.log({'train/loss': tot/max(nb, 1), 'test': ev,
+                'data/train_windows': len(tr_w), 'data/test_windows': len(te_w),
+                **progress.update(ep + 1)}, step=ep + 1)
 print(f"[det] DONE best {json.dumps(best)} -> {a.out}", flush=True)
 logger.finish({'best': best} if best else None)

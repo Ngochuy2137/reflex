@@ -8,10 +8,34 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'source/reflex'))
-from reflex.utils.training_time import estimate_time, format_duration, make_timed_runner
+from reflex.utils.training_time import ProgressTimer, estimate_time, format_duration, make_timed_runner
 
 
 class TimingTests(unittest.TestCase):
+    def test_phase_reports_intervals_and_final_partial_interval(self):
+        output = io.StringIO()
+        with patch('reflex.utils.training_time.time.monotonic', side_effect=[100, 120, 150]), \
+                contextlib.redirect_stdout(output):
+            progress = ProgressTimer('Collection round 1/3', 25, every=10)
+            self.assertEqual(progress.update(1), {})
+            first = progress.update(10)
+            self.assertEqual(progress.update(10), {})
+            final = progress.update(25)
+        self.assertEqual(first['Perf/average_unit_seconds'], 2)
+        self.assertEqual(first['Perf/remaining_seconds'], 30)
+        self.assertEqual(final['Perf/remaining_seconds'], 0)
+        self.assertEqual(final['Perf/estimated_total_seconds'], 50)
+        self.assertIn('25/25 steps', output.getvalue())
+        self.assertIn('Collection round 1/3', output.getvalue())
+
+    def test_new_phase_starts_its_own_estimate(self):
+        with patch('reflex.utils.training_time.time.monotonic', side_effect=[100, 110, 200, 204]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            first = ProgressTimer('Round 1', 5, unit='epochs').update(1)
+            second = ProgressTimer('Round 2', 5, unit='epochs').update(1)
+        self.assertEqual(first['Perf/estimated_total_seconds'], 50)
+        self.assertEqual(second['Perf/estimated_total_seconds'], 20)
+
     def test_average_and_final_iteration(self):
         self.assertEqual(estimate_time(10, 2, 5), (5, 15, 25))
         self.assertEqual(estimate_time(25, 5, 5), (5, 0, 25))

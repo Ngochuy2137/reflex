@@ -826,6 +826,10 @@ def main():
     throw_log    = []
 
 
+    from reflex.utils.training_time import ProgressTimer
+    phase = 'Stage 3 collection' if args.save_feats else 'Evaluation'
+    progress = ProgressTimer(f'{phase} ({os.path.basename(args.out)})', args.episode_steps,
+                             every=max(1, args.episode_steps // 10))
     with torch.inference_mode():
         for step in range(args.episode_steps):
             action = actor(obs)
@@ -859,6 +863,7 @@ def main():
             obs = obs_dict["policy"]
 
             if step < args.eval_start_step:
+                progress.update(step + 1)
                 continue
 
             # Use shared compute_strict_components — same geometry as training.
@@ -1268,6 +1273,8 @@ def main():
                 print(f"[strict] step={step} strict_pass={n_strict}/{B} loose_pass={n_loose}/{B}"
                       f" | PERTHROW {th}/{tn} = {rate:.1f}%"
                       f" LOOSE {thl}/{tn} = {rate_l:.1f}%{_sd}", flush=True)
+
+            progress.update(step + 1)
 
     # Final summary
     result = {
