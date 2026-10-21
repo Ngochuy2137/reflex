@@ -24,7 +24,12 @@ p = argparse.ArgumentParser(); p.add_argument("--num_envs", type=int, default=25
 p.add_argument("--rounds", type=int, default=3); p.add_argument("--epochs", type=int, default=6); p.add_argument("--lr", type=float, default=1e-3)
 p.add_argument("--final_epochs", type=int, default=0, help="after the DAgger rounds: this many extra epochs on ALL data with a cosine lr decay to 1e-5"); p.add_argument("--init_from", default=None, help="continue from a previous bc_init ckpt instead of the blind start"); p.add_argument("--seed", type=int, default=11, help="env + torch seed (independent initialisations per training seed)"); p.add_argument("--teacher_ckpt", required=True); p.add_argument("--out", required=True)
 p.add_argument("--motion_file", default=_paths.MOTION_FILE)
-AppLauncher.add_app_launcher_args(p); a = p.parse_args(); a.headless = True
+p.add_argument("--gui", action="store_true", help="Open the simulator window; headless is the default")
+AppLauncher.add_app_launcher_args(p)
+a = p.parse_args()
+if a.gui and a.headless:
+    p.error("Use either --gui or --headless")
+a.headless = not a.gui
 app = AppLauncher(a).app
 import gymnasium as gym, torch
 import whole_body_tracking.tasks  # noqa

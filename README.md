@@ -47,6 +47,19 @@ protocol behind the paper's simulation results, and the released checkpoints. It
 
 The real-robot deployment stack is not part of this release.
 
+## Table of contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [GUI](#gui)
+- [Data](#data)
+- [Evaluation](#evaluation)
+- [Training](#training)
+  - [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
+- [Repository layout](#repository-layout)
+- [License and acknowledgements](#license-and-acknowledgements)
+- [Citation](#citation)
+
 ## Requirements
 
 - Linux with an NVIDIA **RTX** GPU. Stage 3 and visual evaluation render cameras, which needs RT cores,
@@ -60,22 +73,55 @@ The release was also run end to end on an RTX 4090 with a pip install of Isaac S
 
 ## Installation
 
-**Docker (recommended).** The image pins the versions above.
+Use the Docker image for the paper's environment. The host needs [Docker Compose](https://docs.docker.com/engine/install/ubuntu/)
+and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). All host commands below run from this checkout's
+root unless stated otherwise.
+
+Clone the separate dataset checkout described in the
+[dataset README](../reflex_dataset/README.md). To use it without copying,
+set `REFLEX_DATA_DIR="$(pwd)"` from its root, then return to the Reflex root:
 
 ```bash
-git clone https://github.com/ToberJ/reflex.git && cd reflex
-docker build -f docker/Dockerfile -t reflex .
-docker/run.sh          # shell in /reflex with the GPU; ./data, ./outputs and ./logs are mounted
+export REFLEX_ROOT="$(pwd)"
+# Skip if data already points to the dataset checkout.
+ln -sT "$(realpath --relative-to=. "$REFLEX_DATA_DIR")" data
+docker compose -f docker/compose.yaml build
+bash docker/run.sh
 ```
+
+The shell opens inside the container. `exit` closes the shell; the container is
+kept. On the host, `docker compose -f docker/compose.yaml stop` stops it without
+removing it. `data`, `outputs`, and `logs` are mounted from the host. Files kept
+only inside the container are lost if it is removed or recreated. Source changes
+on the host need a new image build and container recreation. Prepare the motion
+files using the dataset README after starting the container.
 
 **Existing Isaac Lab v2.3.1 install.** Use the Isaac Lab Python (`./isaaclab.sh -p` or `/isaac-sim/python.sh`):
 
 ```bash
-export ISAACLAB_PY=/isaac-sim/python.sh            # or: export ISAACLAB_PY="/path/to/IsaacLab/isaaclab.sh -p"
+# Run from this checkout with your existing Isaac Lab Python active.
+export ISAACLAB_PY=python
 $ISAACLAB_PY -m pip install rsl-rl-lib==3.0.1 tensordict==0.12.0 toml joblib scipy matplotlib "imageio[ffmpeg]" onnxscript psutil wandb
 $ISAACLAB_PY -m pip install --no-deps -e source/whole_body_tracking -e source/reflex
 scripts/setup_assets.sh                            # Unitree G1 description + the hand-collider URDF
 ```
+
+### GUI
+
+Run from an X11 desktop terminal on the host with `DISPLAY`, `XAUTHORITY`, and
+`xauth` available. **Before recreating an existing container, stop training and
+save files stored only inside it.** Then enable the display mounts:
+
+```bash
+bash docker/prepare_gui.sh
+docker compose -f docker/compose.yaml -f docker/compose.gui.yaml \
+  up -d --no-build --pull never --force-recreate reflex
+bash docker/run.sh --gui
+```
+
+The helper stores a private X11 cookie in `.docker-runtime/`, excluded from Git
+and image builds. Only grant desktop access to a trusted container. Later,
+`bash docker/run.sh --gui` reuses this container without recreating it.
 
 ## Data
 
@@ -97,7 +143,7 @@ dataset, which may not be redistributed, so you rebuild it from your own copy:
 
 ```bash
 $ISAACLAB_PY tools/motion/build_reference_motion.py --headless \
-    --bones_csv /path/to/g1/csv/210707/walk_forward_grab_normal_003__A006_M.csv
+    --bones_csv data/raw/bones_seed/g1/csv/210707/walk_forward_grab_normal_003__A006_M.csv
 # -> data/motions/walk_then_catch_v17_30s.npz
 ```
 
@@ -112,6 +158,16 @@ scripts/download_stage3_frames.sh
 ```
 
 ## Evaluation
+
+Run the commands below from the Reflex root inside the prepared container.
+Add `--gui` to open a simulator window, for example:
+
+```bash
+bash scripts/eval.sh teacher --gui --num_envs 16
+```
+
+Headless is the default. Enable the container display as described under
+[GUI](#gui) first. The small GUI example is not the paper evaluation protocol.
 
 ```bash
 scripts/eval.sh visual                   # Stage 3: visual encoder in the loop (paper Table I, "Reflex")
@@ -142,6 +198,13 @@ encoder (seed 8 gave 86.6--90.3 across our and an external tester's runs).
 
 ## Training
 
+Run these commands inside the container. Stage 2 BC/PPO and Stage 3 accept
+`--gui` and `--num_envs N`; omit them to keep the original headless defaults.
+Stage 3 opens windows only during simulation collection and final evaluation.
+BC uses `--teacher` for a Stage 1 checkpoint. PPO uses `--init` for a Stage 2
+BC checkpoint. See [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
+for a sequence that keeps your outputs separate from the released models.
+
 How the released checkpoints were produced and what a rerun is expected to give: [`docs/REPRODUCE.md`](docs/REPRODUCE.md).
 
 ```bash
@@ -169,6 +232,68 @@ scripts/train_stage3.sh                                                 # Stage 
   see [`docs/STAGE3.md`](docs/STAGE3.md), which also lists the reference numbers of every step. `--cnn data/checkpoints/stage3_heatmap_cnn.pt` skips the first
   step and needs no frames (~40 min in total).
 
+### Train your own Stage 2 and 3
+
+Run inside the container, from the Reflex root, with reference and AMP data ready.
+This example keeps the released Stage 1 teacher and trains new Stage 2/3 models.
+Choose a new experiment name for each fresh run:
+
+```bash
+RUN=experiment_01
+
+# Stage 2 BC: learn from the Stage 1 teacher and save a new BC model.
+# Feed your trained policy of stage 1 to stage 2 BC training through parameter --teacher 
+bash scripts/train_stage2.sh bc \
+  --teacher data/checkpoints/teacher_stage1.pt \
+  --out "data/stage2/$RUN/bc_init.pt"
+
+# Stage 2 PPO: start from that BC model, not the released BC model.
+# Feed your trained policy of stage 2 BC to stage 2 PPO training through parameter --init 
+
+bash scripts/train_stage2.sh ppo \
+  --init "data/stage2/$RUN/bc_init.pt" --run_name "$RUN"
+```
+
+PPO saves models under `logs/rsl_rl/reflex/<timestamp>_experiment_01/`.
+After PPO finishes, set the actual path to the checkpoint you want to use:
+
+```bash
+# Replace YOUR_PPO_RUN with the folder created above.
+STAGE2_CKPT=logs/rsl_rl/reflex/YOUR_PPO_RUN/model_599.pt
+
+# Compute Stage 3 loss weights for this Stage 2 controller.
+mkdir -p "data/stage3/$RUN"
+(
+  source scripts/_common.sh
+  load_env configs/train/stage3_collect.env configs/train/stage3_throw_canon.env configs/train/stage3_teacher_boxmix.env
+  export G1_URDF_OVERRIDE="$(pwd)/source/whole_body_tracking/whole_body_tracking/assets/unitree_description/urdf/g1/main_hands.urdf"
+  "$ISAACLAB_PY" -m reflex.vision.latent_weights --headless \
+    --bm_ckpt "$STAGE2_CKPT" \
+    --motion_file data/motions/walk_then_catch_v17_30s.npz \
+    --zw_out "data/stage3/$RUN/latent_weights.npz" \
+    --out "data/stage3/$RUN/latent_probe.json"
+)
+
+# Stage 3: train the image network and visual encoder for your controller.
+# Skip the download if the frame set is already present.
+bash scripts/download_stage3_frames.sh
+bash scripts/train_stage3.sh --run "$RUN" \
+  --controller "$STAGE2_CKPT" --zw "data/stage3/$RUN/latent_weights.npz"
+```
+
+The final visual model is `data/stage3/experiment_01/visual_encoder.pt`.
+Add `--gui` to the BC, PPO, or Stage 3 command for a window. `--num_envs` changes
+training/collection sizes, not just how many robots are shown.
+To reuse the released image network, skip the frame download and add
+`--cnn data/checkpoints/stage3_heatmap_cnn.pt` to Stage 3.
+
+Keep `--init`, `--controller`, and `--zw` when connecting your own outputs;
+omitting them selects released models or weights. A new controller needs its
+own loss weights. The author did not include this custom-controller weight
+calculation in their reproduction check; see
+[Using another controller](docs/STAGE3.md#using-another-controller).
+Stage 3 reuses existing outputs by filename, so use a new `--run` after changing inputs.
+
 ## Repository layout
 
 ```
@@ -179,7 +304,7 @@ source/reflex/       the reflex package: envs (catch task), teacher, latent, vis
 source/whole_body_tracking/   BeyondMimic (motion tracking), trimmed to what Reflex uses
 tools/motion/        rebuild the reference motion and AMP data from public datasets
 assets/              robot URDF with hand colliders, our own motion data, checkpoint and frame-set checksums
-docker/              Dockerfile and run script
+docker/              Dockerfile, Compose files, GUI helpers and runtime check
 ```
 
 **Configuration.** The environments are configured through environment variables (`BOX_*`), which the

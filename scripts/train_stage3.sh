@@ -12,7 +12,9 @@
 # skipped, so rerunning the same command resumes. Outputs are reused by name: use a new --run after changing inputs.
 #
 # usage: scripts/train_stage3.sh [--run NAME] [--out DIR] [--frames DIR] [--labels FILE] [--controller CKPT]
-#                                [--cnn CKPT] [--zw NPZ] [--rounds N] [--no_eval] [--print_config]
+#                                [--cnn CKPT] [--zw NPZ] [--rounds N] [--no_eval] [--print_config] [--gui] [--num_envs N]
+#   --gui           open simulator windows during collection and evaluation; default is headless
+#   --num_envs      override both collection block sizes and the final evaluation size
 #   --run           outputs go to $DATA/stage3/<run>/ (default: default)
 #   --out           output directory (overrides --run)
 #   --frames        rendered frame set of step 1: chunk_*.npz + label file (default: $DATA/stage3/frames/v10_s7_rgbd)
@@ -29,12 +31,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 RUN=default; OUT=""; FRAMES=$DATA/stage3/frames/v10_s7_rgbd; LABELS=labels_v10.npz
 CTRL=$DATA/checkpoints/latent_stage2.pt; CNN=""; ZW=$DATA/checkpoints/stage3_latent_weights.npz
 ROUNDS=2; EVAL=1; PRINT=0
+ENV_COUNT=""; VIEW_ARGS=(--headless); EVAL_ARGS=()
 while [ $# -gt 0 ]; do case $1 in
   --run) RUN=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --frames) FRAMES=$2; shift 2 ;; --labels) LABELS=$2; shift 2 ;;
   --controller) CTRL=$2; shift 2 ;; --cnn) CNN=$2; shift 2 ;; --zw) ZW=$2; shift 2 ;; --rounds) ROUNDS=$2; shift 2 ;;
   --no_eval) EVAL=0; shift ;; --print_config) PRINT=1; shift ;;
+  --gui) VIEW_ARGS=(--gui); EVAL_ARGS+=(--gui); shift ;;
+  --num_envs) ENV_COUNT=$2; shift 2 ;;
   -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
   *) echo "unknown arg $1"; awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 1 ;; esac; done
+if [ -n "$ENV_COUNT" ] && { [[ ! "$ENV_COUNT" =~ ^[1-9][0-9]*$ ]]; }; then
+  echo '--num_envs must be a positive integer' >&2; exit 1
+fi
 [ -n "$OUT" ] || OUT=$DATA/stage3/$RUN
 abspath () { case $1 in ""|/*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }   # the script works from the repo root
 OUT=$(abspath "$OUT"); FRAMES=$(abspath "$FRAMES"); CTRL=$(abspath "$CTRL"); CNN=$(abspath "$CNN"); ZW=$(abspath "$ZW")
@@ -42,6 +50,10 @@ CFG=$ROOT/configs/train
 URDF=$ROOT/source/whole_body_tracking/whole_body_tracking/assets/unitree_description/urdf/g1/main_hands.urdf
 TEACHER_SEEDS="11 12"; DAGGER_SEED=7
 declare -A NENV=([canon]=320 [offset]=160)     # environments per throw block
+if [ -n "$ENV_COUNT" ]; then
+  NENV[canon]=$ENV_COUNT; NENV[offset]=$ENV_COUNT
+  EVAL_ARGS+=(--num_envs "$ENV_COUNT")
+fi
 
 # configuration of a collection cell, in load order (later files override earlier ones):
 #   kind teacher|dagger, block canon|offset
@@ -102,7 +114,7 @@ collect () {
   [ "$kind" = teacher ] && extra=(--det_shadow "$c.shadow.npz")
   log "  $tag: ${NENV[$blk]} envs, seed $seed (log: $OUT/logs/$tag.log)"; local t0=$SECONDS
   ( load_env $(layers "$kind" "$blk"); export G1_URDF_OVERRIDE=$URDF
-    $PY -m reflex.eval.per_throw_eval --headless --num_envs "${NENV[$blk]}" --seed "$seed" --env_id Reflex-Latent-G1-v0 \
+    $PY -m reflex.eval.per_throw_eval "${VIEW_ARGS[@]}" --num_envs "${NENV[$blk]}" --seed "$seed" --env_id Reflex-Latent-G1-v0 \
       --motion_file "$MOTION" --bm_ckpt "$CTRL" --detector "$enc" "${extra[@]}" \
       --save_feats "$c.partial.npz" --out "$c.json" ) > "$OUT/logs/$tag.log" 2>&1 \
     || { log "  $tag: FAILED, see $OUT/logs/$tag.log"; exit 1; }
@@ -146,7 +158,7 @@ if [ $EVAL = 1 ]; then
   EV=$OUT/eval/visual_regular_s8.json
   if [ -f "$EV" ]; then log "5 eval: exists, skipped ($EV)"; else
     log "5 eval: CLEAN2 regular, seed 8 (log: $OUT/logs/eval_regular_s8.log)"; t0=$SECONDS
-    "$ROOT/scripts/eval.sh" visual --ckpt "$CTRL" --detector "$OUT/visual_encoder.pt" --seed 8 --out "$EV.partial" \
+    "$ROOT/scripts/eval.sh" visual "${EVAL_ARGS[@]}" --ckpt "$CTRL" --detector "$OUT/visual_encoder.pt" --seed 8 --out "$EV.partial" \
       > "$OUT/logs/eval_regular_s8.log" 2>&1 || { log "5 eval: FAILED, see $OUT/logs/eval_regular_s8.log"; exit 1; }
     mv "$EV.partial" "$EV"
     log "5 eval: done in $(( (SECONDS - t0) / 60 )) min"

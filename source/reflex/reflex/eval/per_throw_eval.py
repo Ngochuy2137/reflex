@@ -91,13 +91,16 @@ parser.add_argument("--spawn_radius", type=float, default=None,
                     help="REAL physical spawn radius — replaces scene.balloon at "
                          "scene-build, so PhysX collision matches visual. For "
                          "honest multi-size physics tests.")
+parser.add_argument("--gui", action="store_true", help="Open the simulator window; headless is the default")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
+if args.gui and args.headless:
+    parser.error("Use either --gui or --headless")
 args.enable_cameras = bool(args.detector)   # cameras only for the visual-encoder (detector-in-loop) path
 if args.detector:
     import faulthandler, sys as _fh_sys
     faulthandler.dump_traceback_later(240, repeat=True, file=_fh_sys.stderr)   # debug aid: periodic stack dump if the camera path stalls
-args.headless = True
+args.headless = not args.gui
 
 app_launcher = AppLauncher(args)
 sim_app = app_launcher.app

@@ -11,6 +11,7 @@
 #   --ckpt       controller checkpoint (default: the released one for the mode)
 #   --detector   visual encoder checkpoint for `visual` (default: data/checkpoints/visual_encoder_stage3.pt)
 #   --overlay    extra KEY=VALUE file applied after the protocol and condition (repeatable)
+#   --gui        open the simulator window; headless is the default
 #
 # Environment:
 #   ISAACLAB_PY      Python of your Isaac Lab install (default: python). e.g. "./isaaclab.sh -p" or /isaac-sim/python.sh
@@ -22,6 +23,7 @@ PY=${ISAACLAB_PY:-python}
 
 MODE=${1:-}; shift || true
 COND=regular; SEED=8; NENV=320; OUT=""; CKPT_ARG=""; DET_ARG=""; OVERLAYS=(); EXTRA=()
+VIEW_ARGS=(--headless)
 while [ $# -gt 0 ]; do
   case $1 in
     --condition) COND=$2; shift 2 ;;
@@ -31,6 +33,7 @@ while [ $# -gt 0 ]; do
     --ckpt) CKPT_ARG=$2; shift 2 ;;
     --detector) DET_ARG=$2; shift 2 ;;
     --overlay) OVERLAYS+=("$2"); shift 2 ;;
+    --gui) VIEW_ARGS=(--gui); shift ;;
     *) EXTRA+=("$1"); shift ;;
   esac
 done
@@ -67,7 +70,7 @@ set +a
 export G1_URDF_OVERRIDE=$URDF   # G1 with box-shaped hand colliders (assets/robots/main_hands.urdf)
 
 cd "$ROOT"
-$PY -m reflex.eval.per_throw_eval --headless --num_envs "$NENV" --seed "$SEED" \
+$PY -m reflex.eval.per_throw_eval "${VIEW_ARGS[@]}" --num_envs "$NENV" --seed "$SEED" \
   --eval_start_step 0 --episode_steps 640 --push_robot 0 --motion_phase 300,860 \
   --env_id "$TASK" --motion_file "$MOTION" --bm_ckpt "$CKPT" --out "$OUT" "${EXTRA[@]}"
 $PY -m reflex.eval.summarize "$OUT" --condition "$COND"

@@ -1,6 +1,7 @@
 data/
 outputs/
 logs/
+.docker-runtime/
 .git/
 **/__pycache__/
 source/whole_body_tracking/whole_body_tracking/assets/unitree_description/

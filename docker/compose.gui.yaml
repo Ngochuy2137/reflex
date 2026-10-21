@@ -1,0 +1,20 @@
+# Apply with compose.yaml from a terminal in the host desktop session.
+services:
+  reflex:
+    environment:
+      DISPLAY: ${DISPLAY:?Open a terminal in the host desktop session}
+      XAUTHORITY: /tmp/reflex.Xauthority
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.docker-runtime/Xauthority
+        target: /tmp/reflex.Xauthority
+        read_only: true
+        bind:
+          create_host_path: false
