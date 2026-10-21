@@ -55,6 +55,7 @@ The real-robot deployment stack is not part of this release.
 - [Data](#data)
 - [Evaluation](#evaluation)
 - [Training](#training)
+  - [Online logging with W&B](#online-logging-with-wb)
   - [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
 - [Repository layout](#repository-layout)
 - [License and acknowledgements](#license-and-acknowledgements)
@@ -205,6 +206,13 @@ BC uses `--teacher` for a Stage 1 checkpoint. PPO uses `--init` for a Stage 2
 BC checkpoint. See [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
 for a sequence that keeps your outputs separate from the released models.
 
+Stage 2 PPO also prints completed/total iterations, average iteration time,
+estimated remaining time and estimated total time. Estimates use wall-clock time
+since the current training call started, divided by completed iterations. They
+include earlier logging/checkpoint overhead, exclude simulator setup before training,
+and restart when training resumes. Final checkpoint saving may take extra time.
+The same estimates are logged under `Perf/` in TensorBoard or W&B.
+
 How the released checkpoints were produced and what a rerun is expected to give: [`docs/REPRODUCE.md`](docs/REPRODUCE.md).
 
 ```bash
@@ -231,6 +239,55 @@ scripts/train_stage3.sh                                                 # Stage 
   (`chunk_0000.npz` … `chunk_0011.npz` + `labels_v10.npz`), downloaded by `scripts/download_stage3_frames.sh`;
   see [`docs/STAGE3.md`](docs/STAGE3.md), which also lists the reference numbers of every step. `--cnn data/checkpoints/stage3_heatmap_cnn.pt` skips the first
   step and needs no frames (~40 min in total).
+
+### Online logging with W&B
+
+Run inside the container, from the Reflex root. Log in once, then enable W&B
+for the training and evaluation commands in this section:
+
+```bash
+"$ISAACLAB_PY" -m wandb login
+export REFLEX_LOGGER=wandb
+export WANDB_PROJECT=reflex
+export WANDB_RUN_GROUP=experiment_01
+```
+
+Enter your API key in the login prompt. Do not put it in scripts or Git.
+Set `WANDB_ENTITY` only if you want to use a specific account or team.
+Each training process creates a separate run in the same group:
+
+| Step | Logged values |
+| --- | --- |
+| Stage 2 BC | Training loss and held-out action error, including box-visible frames |
+| Stage 2 PPO | Native RSL-RL rewards, losses, episode length and environment metrics |
+| Stage 3 CNN and temporal encoder | Training loss and existing test errors; best model scores in the run summary |
+| Evaluation | Throw/catch/fall counts and success rates after evaluation completes |
+
+Stage 3 data collection does not create a separate W&B run. Its CNN and encoder
+URLs appear in `data/stage3/<run>/logs/`. Skipped training steps create no new run.
+Evaluation rates use fractions from 0 to 1; no rate is logged when no throws were observed.
+
+You can also select logging per command. Create `RUN` and the BC checkpoint first,
+as shown in the next section:
+
+```bash
+bash scripts/train_stage2.sh ppo \
+  --init "data/stage2/$RUN/bc_init.pt" --run_name "$RUN" \
+  --logger wandb --log_project_name reflex --wandb_group "$RUN"
+```
+
+| Option | Values and purpose |
+| --- | --- |
+| `--logger` | `wandb` enables online logging. PPO also supports `tensorboard` (default); other steps support `none` (default). `REFLEX_LOGGER` sets the shared default. |
+| `--log_project_name` | W&B project; defaults to `WANDB_PROJECT` or `reflex`. |
+| `--wandb_group` | Groups related runs; defaults to `WANDB_RUN_GROUP`, then the training run name or `evaluation`. |
+| `--wandb_mode` | `online` (default) or `offline` for local testing without uploads. |
+
+W&B prints the dashboard URL. BC, Stage 3 and evaluation also save run details
+under `logs/wandb/links/`. PPO saves `wandb_run.json` in its training log folder
+when training ends and keeps its local TensorBoard logs. Native RSL-RL W&B
+logging also uploads PPO checkpoints. Existing running jobs keep their original logger;
+these options apply when starting a new process.
 
 ### Train your own Stage 2 and 3
 

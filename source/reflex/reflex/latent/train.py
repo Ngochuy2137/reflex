@@ -250,7 +250,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print("[AMP] algorithm class -> AmpPPO", flush=True)
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(
+    from reflex.utils.training_time import make_timed_runner
+    runner = make_timed_runner(OnPolicyRunner)(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
     )
     # AMP: attach the discriminator context (dataset + weights via env vars)
@@ -366,7 +367,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
 
     # run training
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    training_completed = False
+    try:
+        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+        training_completed = True
+    finally:
+        if agent_cfg.logger == "wandb" and not runner.disable_logs:
+            from reflex.utils.experiment_logging import finish_ppo_logging
+            finish_ppo_logging(log_dir, exit_code=0 if training_completed else 1)
 
     # close the simulator
     env.close()

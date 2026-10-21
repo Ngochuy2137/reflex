@@ -97,6 +97,8 @@ def evaluate():
                 flt_pos_rmse=[round(float(x), 3) for x in ((pp[flc] - pt[flc]) ** 2).mean(0).sqrt()], flt_vel_rmse=[round(float(x), 3) for x in ((vp[flc] - vt[flc]) ** 2).mean(0).sqrt()])
 model.train()   # frame-feature extraction above ran in eval mode; cudnn GRU backward needs training mode
 fs_t = torch.from_numpy(fs).to(dev); best = None; t0 = time.time()
+from reflex.utils.experiment_logging import ExperimentLogger
+logger = ExperimentLogger('stage3_encoder', vars(a))
 for ep in range(a.epochs):
     perm = torch.randperm(len(tr_t), device=dev); tot = 0.0; nb = 0
     for i in range(0, len(perm), a.bs):
@@ -107,9 +109,12 @@ for ep in range(a.epochs):
         opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(params, 1.0); opt.step(); sched.step(); tot += float(loss); nb += 1
     if (ep + 1) % 5 == 0 or ep == a.epochs - 1:
         ev = evaluate(); print(f"[seq] epoch {ep+1}/{a.epochs} loss {tot/nb:.4f}  test {json.dumps(ev)}  {time.time()-t0:.0f}s", flush=True)
+        logger.log({'train/loss': tot/nb, 'test': ev,
+                    'data/train_windows': len(tr_w), 'data/test_windows': len(te_w)}, step=ep + 1)
         if best is None or ev["flt_zw_mse"] < best["flt_zw_mse"]:
             best = dict(ev, epoch=ep + 1)
             torch.save({"model": model.state_dict(), "arch": "kpseq", "in_ch": 4, "win": a.win, "zdim": ZD, "hidden": a.hidden, "dropout": a.dropout, "eval": best, "kp_src": a.kp,
                         "aux_norm": dict(pmean=pm.tolist(), pstd=ps.tolist(), vmean=vm.tolist(), vstd=vs.tolist())}, a.out)
 print(f"[seq] DONE best {json.dumps(best)} -> {a.out}", flush=True)
 print(f"[det] DONE best {json.dumps(best)} -> {a.out}", flush=True)   # same completion marker as train_detector.py, for scripts that wait on it
+logger.finish({'best': best} if best else None)

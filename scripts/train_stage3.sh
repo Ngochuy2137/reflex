@@ -15,6 +15,7 @@
 #                                [--cnn CKPT] [--zw NPZ] [--rounds N] [--no_eval] [--print_config] [--gui] [--num_envs N]
 #   --gui           open simulator windows during collection and evaluation; default is headless
 #   --num_envs      override both collection block sizes and the final evaluation size
+#   --logger wandb --log_project_name reflex --wandb_group NAME [--wandb_mode online|offline]
 #   --run           outputs go to $DATA/stage3/<run>/ (default: default)
 #   --out           output directory (overrides --run)
 #   --frames        rendered frame set of step 1: chunk_*.npz + label file (default: $DATA/stage3/frames/v10_s7_rgbd)
@@ -32,12 +33,16 @@ RUN=default; OUT=""; FRAMES=$DATA/stage3/frames/v10_s7_rgbd; LABELS=labels_v10.n
 CTRL=$DATA/checkpoints/latent_stage2.pt; CNN=""; ZW=$DATA/checkpoints/stage3_latent_weights.npz
 ROUNDS=2; EVAL=1; PRINT=0
 ENV_COUNT=""; VIEW_ARGS=(--headless); EVAL_ARGS=()
+LOGGER=${REFLEX_LOGGER:-none}; PROJECT=${WANDB_PROJECT:-reflex}
+WB_GROUP=${WANDB_RUN_GROUP:-}; WB_MODE=online
 while [ $# -gt 0 ]; do case $1 in
   --run) RUN=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --frames) FRAMES=$2; shift 2 ;; --labels) LABELS=$2; shift 2 ;;
   --controller) CTRL=$2; shift 2 ;; --cnn) CNN=$2; shift 2 ;; --zw) ZW=$2; shift 2 ;; --rounds) ROUNDS=$2; shift 2 ;;
   --no_eval) EVAL=0; shift ;; --print_config) PRINT=1; shift ;;
   --gui) VIEW_ARGS=(--gui); EVAL_ARGS+=(--gui); shift ;;
   --num_envs) ENV_COUNT=$2; shift 2 ;;
+  --logger) LOGGER=$2; shift 2 ;; --log_project_name) PROJECT=$2; shift 2 ;;
+  --wandb_group) WB_GROUP=$2; shift 2 ;; --wandb_mode) WB_MODE=$2; shift 2 ;;
   -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
   *) echo "unknown arg $1"; awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 1 ;; esac; done
 if [ -n "$ENV_COUNT" ] && { [[ ! "$ENV_COUNT" =~ ^[1-9][0-9]*$ ]]; }; then
@@ -73,6 +78,9 @@ if [ $PRINT = 1 ]; then
 fi
 
 need "$CTRL" "$ZW" "$MOTION" "$URDF"
+[ "$LOGGER" != tensorboard ] || { echo 'Stage 3 supports --logger none or wandb' >&2; exit 1; }
+[ -n "$WB_GROUP" ] || WB_GROUP=$RUN
+setup_logging "$LOGGER" "$PROJECT" "$WB_GROUP" "$WB_MODE" "$RUN" stage3
 mkdir -p "$OUT/collect" "$OUT/logs"
 cd "$ROOT"
 log () { echo "[stage3 $(date +%H:%M)] $*"; }
@@ -84,7 +92,7 @@ if [ -z "$CNN" ]; then
     [ -f "$FRAMES/$LABELS" ] && ls "$FRAMES"/chunk_*.npz > /dev/null 2>&1 \
       || { echo "missing frame set: $FRAMES/{chunk_*.npz,$LABELS} (scripts/download_stage3_frames.sh; --cnn CKPT skips step 1)"; exit 1; }
     log "1 cnn: training on $FRAMES (log: $OUT/logs/heatmap_cnn.log)"; t0=$SECONDS
-    $PY -m reflex.vision.train_detector --frames_dir "$FRAMES" --labels "$LABELS" --out "$CNN.partial" \
+    WANDB_NAME="${RUN}_stage3_cnn" $PY -m reflex.vision.train_detector --frames_dir "$FRAMES" --labels "$LABELS" --out "$CNN.partial" \
       --epochs 20 --bs 32 --w_kl 0 --w_flight 8 --flight_select --arch kp --depth --w_uv 1.0 --color_aug 0.7 \
       > "$OUT/logs/heatmap_cnn.log" 2>&1 || { log "1 cnn: FAILED, see $OUT/logs/heatmap_cnn.log"; exit 1; }
     grep -aq "\[det\] DONE" "$OUT/logs/heatmap_cnn.log" || { log "1 cnn: no DONE line, see $OUT/logs/heatmap_cnn.log"; exit 1; }
@@ -129,7 +137,7 @@ train_encoder () {
   local enc=$OUT/encoder_it$1.pt lg=$OUT/logs/encoder_it$1.log
   if [ -f "$enc" ]; then log "  it$1: exists, skipped"; return; fi
   log "  it$1: training on $(echo "${SETS#,}" | tr ',' '\n' | wc -l) feature sets (log: $lg)"; local t0=$SECONDS
-  $PY -m reflex.vision.train_seqdet --frames_dir none --labels none --feat_sets "${SETS#,}" --kp "$CNN" --zdim 8 \
+  WANDB_NAME="${RUN}_stage3_encoder_it$1" $PY -m reflex.vision.train_seqdet --frames_dir none --labels none --feat_sets "${SETS#,}" --kp "$CNN" --zdim 8 \
     --zw "$ZW" --out "$enc.partial" > "$lg" 2>&1 || { log "  it$1: FAILED, see $lg"; exit 1; }
   grep -aq "\[seq\] DONE" "$lg" || { log "  it$1: no DONE line, see $lg"; exit 1; }
   mv "$enc.partial" "$enc"
@@ -158,7 +166,9 @@ if [ $EVAL = 1 ]; then
   EV=$OUT/eval/visual_regular_s8.json
   if [ -f "$EV" ]; then log "5 eval: exists, skipped ($EV)"; else
     log "5 eval: CLEAN2 regular, seed 8 (log: $OUT/logs/eval_regular_s8.log)"; t0=$SECONDS
-    "$ROOT/scripts/eval.sh" visual "${EVAL_ARGS[@]}" --ckpt "$CTRL" --detector "$OUT/visual_encoder.pt" --seed 8 --out "$EV.partial" \
+    "$ROOT/scripts/eval.sh" visual "${EVAL_ARGS[@]}" --logger "$LOGGER" --log_project_name "$PROJECT" \
+      --wandb_group "$WB_GROUP" --wandb_mode "$WB_MODE" \
+      --ckpt "$CTRL" --detector "$OUT/visual_encoder.pt" --seed 8 --out "$EV.partial" \
       > "$OUT/logs/eval_regular_s8.log" 2>&1 || { log "5 eval: FAILED, see $OUT/logs/eval_regular_s8.log"; exit 1; }
     mv "$EV.partial" "$EV"
     log "5 eval: done in $(( (SECONDS - t0) / 60 )) min"

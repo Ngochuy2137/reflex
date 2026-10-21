@@ -25,11 +25,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("files", nargs="+")
     p.add_argument("--condition", default=None, help="condition name (default: parsed from the file name)")
+    p.add_argument('--policy_mode', default=None)
+    p.add_argument('--controller', default=None)
+    p.add_argument('--detector', default=None)
+    p.add_argument('--seed', type=int, default=None)
     a = p.parse_args()
     cond = a.condition or a.files[0].split("/")[-1].split("_", 1)[1].rsplit("_s", 1)[0]
     caught = icpt = fell = n = 0
     for f in a.files:
-        throws = [t for t in json.load(open(f))["throw_log"] if t.get("idx", 1) == 1]
+        with open(f) as stream:
+            throws = [t for t in json.load(stream)["throw_log"] if t.get("idx", 1) == 1]
         n += len(throws)
         caught += sum(sustained_hold(t) if cond in SUSTAINED else bool(t["caught"]) for t in throws)
         icpt += sum(bool(t.get("intercepted")) for t in throws)
@@ -39,6 +44,14 @@ def main():
     rule = "sustained hold" if cond in SUSTAINED else "chest criterion"
     print(f"[summary] condition={cond} throws={n} | catch success ({rule}) {100 * rate:.1f}% +/- {100 * ci:.1f} (95% CI)"
           f" | interception {100 * icpt / max(n, 1):.1f}% | falls {fell}")
+    from reflex.utils.experiment_logging import ExperimentLogger
+    logger = ExperimentLogger('evaluation', dict(vars(a), catch_rule=rule))
+    metrics = {'eval/throws': n, 'eval/catches': caught, 'eval/falls': fell}
+    if n:
+        metrics.update({'eval/catch_success_rate': rate, 'eval/interception_rate': icpt/n,
+                        'eval/fall_rate': fell/n, 'eval/catch_success_ci95_half_width': ci})
+    logger.log(metrics, step=0)
+    logger.finish(metrics)
 
 
 if __name__ == "__main__":

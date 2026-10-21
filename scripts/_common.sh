@@ -18,3 +18,18 @@ load_env () {
 }
 
 need () { local f; for f in "$@"; do [ -f "$f" ] || { echo "missing: $f  (see README: Setup)"; exit 1; }; done; }
+
+# Call after load_env so legacy WANDB_MODE=offline does not override the CLI.
+setup_logging () {
+  local logger=$1 project=$2 group=$3 mode=$4 name=$5 job=$6
+  case "$logger" in none|tensorboard|wandb) ;; *) echo "Unsupported logger: $logger" >&2; exit 1 ;; esac
+  export REFLEX_LOGGER=$logger
+  [ "$logger" = wandb ] || return 0
+  case "$mode" in online|offline) ;; *) echo '--wandb_mode must be online or offline' >&2; exit 1 ;; esac
+  export WANDB_PROJECT=$project WANDB_RUN_GROUP=$group WANDB_MODE=$mode
+  export WANDB_NAME=$name WANDB_JOB_TYPE=$job
+  export WANDB_DIR=${WANDB_DIR:-$ROOT/logs/wandb}
+  mkdir -p "$WANDB_DIR"
+  # RSL-RL reads WANDB_USERNAME for the same account/team setting.
+  if [ -n "${WANDB_ENTITY:-}" ]; then export WANDB_USERNAME=$WANDB_ENTITY; fi
+}

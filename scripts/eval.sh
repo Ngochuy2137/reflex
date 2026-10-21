@@ -12,18 +12,19 @@
 #   --detector   visual encoder checkpoint for `visual` (default: data/checkpoints/visual_encoder_stage3.pt)
 #   --overlay    extra KEY=VALUE file applied after the protocol and condition (repeatable)
 #   --gui        open the simulator window; headless is the default
+#   --logger wandb --log_project_name reflex --wandb_group NAME [--wandb_mode online|offline]
 #
 # Environment:
 #   ISAACLAB_PY      Python of your Isaac Lab install (default: python). e.g. "./isaaclab.sh -p" or /isaac-sim/python.sh
 #   REFLEX_DATA_DIR  where checkpoints and the rebuilt reference motion live (default: <repo>/data)
 set -euo pipefail
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-DATA=${REFLEX_DATA_DIR:-$ROOT/data}
-PY=${ISAACLAB_PY:-python}
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 MODE=${1:-}; shift || true
 COND=regular; SEED=8; NENV=320; OUT=""; CKPT_ARG=""; DET_ARG=""; OVERLAYS=(); EXTRA=()
 VIEW_ARGS=(--headless)
+LOGGER=${REFLEX_LOGGER:-none}; PROJECT=${WANDB_PROJECT:-reflex}
+WB_GROUP=${WANDB_RUN_GROUP:-}; WB_MODE=online
 while [ $# -gt 0 ]; do
   case $1 in
     --condition) COND=$2; shift 2 ;;
@@ -34,13 +35,16 @@ while [ $# -gt 0 ]; do
     --detector) DET_ARG=$2; shift 2 ;;
     --overlay) OVERLAYS+=("$2"); shift 2 ;;
     --gui) VIEW_ARGS=(--gui); shift ;;
+    --logger) LOGGER=$2; shift 2 ;; --log_project_name) PROJECT=$2; shift 2 ;;
+    --wandb_group) WB_GROUP=$2; shift 2 ;; --wandb_mode) WB_MODE=$2; shift 2 ;;
     *) EXTRA+=("$1"); shift ;;
   esac
 done
 
 case $MODE in
   visual)  CFG=clean2_latent.env;  TASK=Reflex-Latent-G1-v0;  CKPT=$DATA/checkpoints/latent_stage2.pt
-           EXTRA+=(--detector "${DET_ARG:-$DATA/checkpoints/visual_encoder_stage3.pt}") ;;
+           DET_ARG=${DET_ARG:-$DATA/checkpoints/visual_encoder_stage3.pt}
+           EXTRA+=(--detector "$DET_ARG") ;;
   true_z)  CFG=clean2_latent.env;  TASK=Reflex-Latent-G1-v0;  CKPT=$DATA/checkpoints/latent_stage2.pt ;;
   teacher) CFG=clean2_teacher.env; TASK=Reflex-Teacher-G1-v0; CKPT=$DATA/checkpoints/teacher_stage1.pt ;;
   *) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 1 ;;
@@ -67,10 +71,14 @@ for f in "${OVERLAYS[@]}"; do
   source "$f"
 done
 set +a
+[ "$LOGGER" != tensorboard ] || { echo 'Evaluation supports --logger none or wandb' >&2; exit 1; }
+[ -n "$WB_GROUP" ] || WB_GROUP=evaluation
+setup_logging "$LOGGER" "$PROJECT" "$WB_GROUP" "$WB_MODE" "${MODE}_${COND}_s${SEED}" evaluation
 export G1_URDF_OVERRIDE=$URDF   # G1 with box-shaped hand colliders (assets/robots/main_hands.urdf)
 
 cd "$ROOT"
 $PY -m reflex.eval.per_throw_eval "${VIEW_ARGS[@]}" --num_envs "$NENV" --seed "$SEED" \
   --eval_start_step 0 --episode_steps 640 --push_robot 0 --motion_phase 300,860 \
   --env_id "$TASK" --motion_file "$MOTION" --bm_ckpt "$CKPT" --out "$OUT" "${EXTRA[@]}"
-$PY -m reflex.eval.summarize "$OUT" --condition "$COND"
+$PY -m reflex.eval.summarize "$OUT" --condition "$COND" --policy_mode "$MODE" --seed "$SEED" \
+  --controller "$CKPT" --detector "$DET_ARG"

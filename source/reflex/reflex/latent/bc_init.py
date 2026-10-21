@@ -54,8 +54,12 @@ for q in train_p: q.requires_grad_(True)
 colmask = torch.zeros_like(W0); colmask[:, ac.keep:] = 1.0
 opt = torch.optim.Adam(train_p + [W0], lr=a.lr)
 OBS = []
+from reflex.utils.experiment_logging import ExperimentLogger
+logger = ExperimentLogger('stage2_bc', vars(a))
+log_step = 0
 
 def fit(tag, epochs=None, cosine=False):
+    global log_step
     epochs = a.epochs if epochs is None else epochs
     X = torch.cat(OBS); N = X.shape[0]; g = torch.Generator(device="cpu").manual_seed(0); perm = torch.randperm(N, generator=g)
     te, tr = perm[: N // 10], perm[N // 10:]
@@ -68,6 +72,7 @@ def fit(tag, epochs=None, cosine=False):
             return float(d[m].mean()) if bool(m.any()) else float("nan")
     l0, l0f = loss_on(te), loss_on(te, True)
     for ep in range(epochs):
+        loss_total = 0.0; batch_count = 0
         if cosine:
             import math
             for g_ in opt.param_groups: g_["lr"] = 1e-5 + 0.5 * (a.lr - 1e-5) * (1 + math.cos(math.pi * ep / max(1, epochs - 1)))
@@ -77,8 +82,19 @@ def fit(tag, epochs=None, cosine=False):
             w = 1.0 + 4.0 * box_on[j].float()[:, None]                      # box-visible frames matter most
             loss = (w * (ac.actor(ac.features(o)) - A[j]) ** 2).mean()
             opt.zero_grad(); loss.backward(); W0.grad.mul_(colmask); opt.step()
-    print(f"[bc] {tag}: samples {N} (box visible {float(box_on.float().mean()):.2f})  held-out action MSE all {l0:.5f} -> {loss_on(te):.5f} | "
-          f"box-visible {l0f:.5f} -> {loss_on(te, True):.5f}", flush=True)
+            if logger.run is not None:
+                loss_total += loss.detach(); batch_count += 1
+        if logger.run is not None:
+            log_step += 1
+            logger.log({'train/loss': float(loss_total) / max(batch_count, 1),
+                        'train/samples': N, 'train/epoch_in_round': ep + 1}, step=log_step)
+    l1, l1f = loss_on(te), loss_on(te, True)
+    print(f"[bc] {tag}: samples {N} (box visible {float(box_on.float().mean()):.2f})  held-out action MSE all {l0:.5f} -> {l1:.5f} | "
+          f"box-visible {l0f:.5f} -> {l1f:.5f}", flush=True)
+    log_step += 1
+    logger.log({'test/action_mse_before': l0, 'test/action_mse': l1,
+                'test/box_visible_action_mse_before': l0f, 'test/box_visible_action_mse': l1f,
+                'data/box_visible_fraction': float(box_on.float().mean()), 'data/samples': N}, step=log_step)
 
 for r in range(a.rounds):
     ac.eval()
@@ -95,4 +111,5 @@ with torch.no_grad():
 for q in ac.parameters(): q.requires_grad_(True)
 torch.save({"model_state_dict": ac.state_dict(), "iter": 0, "infos": {"bc_init_from": a.teacher_ckpt}}, a.out)
 print(f"[bc] DONE -> {a.out}", flush=True)
+logger.finish()
 env.close(); app.close()
