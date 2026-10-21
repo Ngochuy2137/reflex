@@ -1,0 +1,32 @@
+name: reflex
+
+services:
+  reflex:
+    image: reflex
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    working_dir: /reflex
+    entrypoint: ["/bin/bash"]
+    command: ["-lc", "exec sleep infinity"]
+    init: true
+    network_mode: host
+    volumes:
+      - type: bind
+        source: ../data
+        target: /reflex/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../outputs
+        target: /reflex/outputs
+      - type: bind
+        source: ../logs
+        target: /reflex/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
