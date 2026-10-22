@@ -20,15 +20,19 @@ umask 077
 mkdir -p "$ROOT/.docker-runtime"
 chmod 700 "$ROOT/.docker-runtime"
 COOKIE="$ROOT/.docker-runtime/Xauthority"
-# Keep the same inode so an existing read-only bind mount sees refreshed cookies.
-touch "$COOKIE"
-chmod 600 "$COOKIE"
-: > "$COOKIE"
+# xauth replaces its output file. Build a temporary file, then copy into the
+# existing inode so the running container's read-only bind mount sees the update.
+WORK_DIR=$(mktemp -d "$ROOT/.docker-runtime/xauth.XXXXXX")
+trap 'rm -rf "$WORK_DIR"' EXIT
+touch "$WORK_DIR/Xauthority"
 printf '%s\n' "$RECORDS" \
   | sed 's/^..../ffff/' \
-  | xauth -f "$COOKIE" nmerge -
-if [ ! -s "$COOKIE" ]; then
+  | xauth -f "$WORK_DIR/Xauthority" nmerge -
+if [ ! -s "$WORK_DIR/Xauthority" ]; then
   echo 'No display cookie found. Check DISPLAY and XAUTHORITY on the host.' >&2
   exit 1
 fi
+touch "$COOKIE"
+chmod 600 "$COOKIE"
+cat "$WORK_DIR/Xauthority" > "$COOKIE"
 echo 'Prepared the private display cookie under .docker-runtime.'

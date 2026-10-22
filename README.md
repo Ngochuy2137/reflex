@@ -54,6 +54,7 @@ The real-robot deployment stack is not part of this release.
   - [GUI](#gui)
 - [Data](#data)
 - [Evaluation](#evaluation)
+  - [Interactive catching demo](#interactive-catching-demo)
 - [Training](#training)
   - [Online logging with W&B](#online-logging-with-wb)
   - [Train your own Stage 2 and 3](#train-your-own-stage-2-and-3)
@@ -123,6 +124,8 @@ bash docker/run.sh --gui
 The helper stores a private X11 cookie in `.docker-runtime/`, excluded from Git
 and image builds. Only grant desktop access to a trusted container. Later,
 `bash docker/run.sh --gui` reuses this container without recreating it.
+After logging out of the desktop and back in, run `bash docker/run.sh --gui` command again from the
+host to refresh X11 authorization before starting GUI programs.
 
 ## Data
 
@@ -196,6 +199,64 @@ the paper's per-throw results exactly (checked on seed 8, all 320 throws). On ot
 individual throws can differ while the pooled rates stay within a point or two. Camera
 rendering in Isaac Sim is not deterministic, so `visual` varies by 1--3 points between runs of the same
 encoder (seed 8 gave 86.6--90.3 across our and an external tester's runs).
+
+### Interactive catching demo
+
+The demo uses one robot, its simulated RGB-D camera, and your matching Stage 2/3
+checkpoints. After the one-time [GUI setup](#gui), start it in two steps.
+
+**1. On the host**, from the Reflex root, log in a container shell with GUI access:
+
+```bash
+bash docker/run.sh --gui
+```
+
+This refreshes desktop authorization and opens a shell; it does not start the demo.
+
+**2. Inside that container shell**, from the Reflex root, start the demo:
+
+```bash
+# Replace TIMESTAMP with each existing checkpoint folder's timestamp.
+STAGE2_CKPT="logs/experiment_01/stage2_ppo_<TIMESTAMP>/model_599.pt"
+STAGE3_CKPT="logs/experiment_01/stage3_<TIMESTAMP>/visual_encoder.pt"
+bash scripts/demo.sh \
+  --ckpt "$STAGE2_CKPT" --detector "$STAGE3_CKPT"
+```
+
+If you are already inside the container and GUI access works, only step 2 is
+needed. After logging out of the desktop and back in, repeat step 1 from the host.
+
+The **Reflex Catching Demo** window has distance and object-seed fields:
+
+- Empty distance: sample from the regular 3–3.5 m range. Enter a number to fix
+  the distance in meters. Distances beyond 4.2 m use the existing 12 m/s speed
+  cap from the 5 m/7 m evaluation presets; very distant throws can still fall short.
+- Entered seed: Reset repeats the sampled object parameters. Empty seed: Reset
+  chooses a new seed, shown in the status. The seed controls only object sampling,
+  including release position, orientation, velocity-related parameters and spin.
+- **Reset** applies the fields and prepares a trial without advancing physics.
+  **Play** runs that trial once. Editing a field requires Reset before Play.
+- A 0.6 s hold near the torso, a landed object, a fallen robot, an invalid state
+  or the 12.8 s simulation limit freezes the scene. Inspect it, then press Reset.
+  Play cannot restart a finished trial without Reset.
+
+Optional starting values: `--distance 5 --seed 9`. Simulation is paced near real
+time, but may run slower if rendering is expensive. The status shows simulation
+time, wall-clock time and their speed ratio. `1.00x`
+means real time; `0.25x` means one simulation second takes four wall-clock seconds.
+This display slowdown does not change gravity or the physics/control timestep.
+Completed trial JSON also contains per-step timing, posture, speed and runtime
+settings for diagnosis. Only the sampler is reseeded;
+robot resets keep their existing distribution. Throws are anchored to the robot,
+and launch velocity is adjusted to its live position, just as in evaluation.
+Thus the same object seed does not promise identical world trajectories when
+the robot state changes, or the same trial as `eval.sh --seed` (which seeds the
+whole environment). Reset clears camera/policy history between trials.
+
+This viewer does not train or upload W&B runs. Its hold indicator is for visual
+inspection, not the full benchmark success rule, which also checks later drops.
+Completed trial details are saved in `outputs/demo/last_session.json`.
+Use `eval.sh` for quantitative success rates.
 
 ## Training
 
@@ -300,6 +361,11 @@ Choose a new experiment name for each fresh run:
 RUN=experiment_01
 
 # Stage 2 BC: learn from the Stage 1 teacher and save a new BC model.
+# use wandb logger if you want
+export REFLEX_LOGGER=wandb
+export WANDB_PROJECT=reflex
+export WANDB_RUN_GROUP="$RUN"
+
 # Feed your trained policy of stage 1 to stage 2 BC training through parameter --teacher 
 bash scripts/train_stage2.sh bc \
   --teacher data/checkpoints/teacher_stage1.pt --run_name "$RUN"
@@ -312,6 +378,7 @@ BC_CKPT="logs/$RUN/stage2_bc_TIMESTAMP/bc_init.pt"
 export REFLEX_LOGGER=wandb
 export WANDB_PROJECT=reflex
 export WANDB_RUN_GROUP="$RUN"
+
 # Feed your trained policy of stage 2 BC to stage 2 PPO training through parameter --init 
 bash scripts/train_stage2.sh ppo \
   --init "$BC_CKPT" --run_name "$RUN"

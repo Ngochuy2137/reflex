@@ -92,18 +92,32 @@ parser.add_argument("--spawn_radius", type=float, default=None,
                          "scene-build, so PhysX collision matches visual. For "
                          "honest multi-size physics tests.")
 parser.add_argument("--gui", action="store_true", help="Open the simulator window; headless is the default")
+parser.add_argument("--demo", action="store_true", help="Open the single-environment Play/Reset demo")
+parser.add_argument("--demo_distance", default="", help="Demo throw distance in meters; empty keeps the condition range")
+parser.add_argument("--demo_seed", default="", help="Seed for object sampling only; empty chooses a new seed on Reset")
+parser.add_argument("--demo_smoke", action="store_true", help="Run a bounded demo validation and exit")
+parser.add_argument("--demo_audit", action="store_true", help="Run one complete demo trial without early hold/landing freeze, record timing and posture, then exit")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.gui and args.headless:
     parser.error("Use either --gui or --headless")
+if args.demo and (args.num_envs != 1 or not args.detector or args.det_geo or args.bm_ckpt_center):
+    parser.error("The demo requires one environment, a visual encoder, and no MoE or analytic detector")
+if args.demo_audit and (not args.demo or args.demo_smoke):
+    parser.error('--demo_audit requires --demo and cannot be combined with --demo_smoke')
 args.enable_cameras = bool(args.detector)   # cameras only for the visual-encoder (detector-in-loop) path
-if args.detector:
+if args.detector and not args.demo:
     import faulthandler, sys as _fh_sys
     faulthandler.dump_traceback_later(240, repeat=True, file=_fh_sys.stderr)   # debug aid: periodic stack dump if the camera path stalls
 args.headless = not args.gui
 
 app_launcher = AppLauncher(args)
 sim_app = app_launcher.app
+if args.demo:
+    import omni.appwindow
+    _desktop = omni.appwindow.get_default_app_window()
+    if _desktop is None or not _desktop.get_window():
+        raise RuntimeError('The demo has no desktop window. On the host, run bash docker/run.sh --gui, then retry.')
 
 import sys as _sys  # noqa: E402
 
@@ -295,6 +309,11 @@ def make_env(env_id, motion_file, num_envs, ball_radius=None, seed=42, spawn_rad
     if int(args.push_robot) == 0 and hasattr(env_cfg.events, "push_robot"):
         env_cfg.events.push_robot = None
         print("[protocol] push_robot event REMOVED (no random base kicks during eval)", flush=True)
+    if args.demo:
+        # The demo stops before any reset; only the Reset button starts a new trial.
+        for name in list(vars(env_cfg.terminations)):
+            if not name.startswith('_'):
+                setattr(env_cfg.terminations, name, None)
     return gym.make(env_id, cfg=env_cfg), env_cfg
 
 
@@ -514,6 +533,22 @@ def main():
         actor = _det_policy
         print(f"[latent] DETECTOR-IN-LOOP ACTIVE: {args.detector} win={_dp_W} (E_priv bypassed; z from images)", flush=True)
         print(f"[COND] perception = visual encoder in the loop {args.detector}", flush=True)
+    if args.demo:
+        def reset_demo_vision():
+            _dp_ring.zero_()
+            _dp_filled[0] = 0
+            _dp_fring[0] = None
+            _dp_nz['q'].clear()
+            _dp_nz['prev'][0] = None
+            for value in _dp_geo.values():
+                if torch.is_tensor(value):
+                    value.zero_()
+            _dp_ac.z_external = None
+            _dp_cam.reset()
+        from reflex.eval.catch_demo import run_demo
+        run_demo(env, actor, sim_app, args, reset_demo_vision)
+        env.close()
+        return
     balloon = raw_env.scene["balloon"]
     # [SIZEAWARE] Under BOX_V38_MASS_DR the startup mass-DR event caches the box identity with the old two-model mass
     # threshold (small / mini), so a single real_* box gets the 34x26x22 "small" radius + half-extents -- which the latent
